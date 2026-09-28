@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmark import ci, records  # noqa: E402
+from benchmark import records  # noqa: E402
 from benchmark.methods import BY_NAME, METHODS  # noqa: E402
 from benchmark.scoring import mosev2_server, retention  # noqa: E402
 
@@ -60,14 +60,13 @@ def main():
     print(f"저장: {out} ({len(rows)}줄)\n")
 
     replay_rows = [r for r in rows if r["method"] == "full_replay"]
-    print("회복률 (영상 전체 기준, 영상마다 비율 → 평균 [95% 구간])")
+    print("회복률 (영상 전체 기준, 영상마다 비율 → 평균)")
     for m in METHODS:
         m_rows = [r for r in rows if r["method"] == m.name]
         if not m_rows:
             continue
         ratios, dropped = retention.retention_by_video(m_rows, replay_rows, "jf_whole")
-        result = ci.bootstrap(ratios.values())
-        text = "-" if result is None else f"{result[0]:.1f} [{result[1]:.1f}, {result[2]:.1f}]"
+        text = f"{sum(ratios.values()) / len(ratios):.1f}" if ratios else "-"
         print(f"  {m.label:26s} {text}  (영상 {len(ratios)}개"
               + (f", Full Replay 0점이라 뺀 영상 {dropped}개" if dropped else "") + ")")
 

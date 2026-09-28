@@ -44,7 +44,6 @@ def setup(tmp: Path) -> None:
     settings.DATA_ROOT = str(tmp / "data")
     settings.OUTPUT_ROOT = str(tmp / "outputs")
     settings.DEV_FRACTION = 0.5
-    settings.BOOTSTRAP_SAMPLES = 200
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
 

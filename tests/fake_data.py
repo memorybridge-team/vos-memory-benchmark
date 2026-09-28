@@ -62,7 +62,7 @@ def make_all(data_root: Path, folders: dict) -> None:
     split_layout("mosev2", "train", [f"mtrain_{i:02d}" for i in range(6)])
     split_layout("mosev2", "valid", ["mval_00", "mval_01"], first_frame_only=True)
     split_layout("lvos_v2", "train", [f"ltrain_{i:02d}" for i in range(10)])
-    split_layout("lvos_v2", "valid", ["lval_00", "lval_01", "lval_02"])
+    split_layout("lvos_v2", "val", ["lval_00", "lval_01", "lval_02"])      # LVOS v2 는 폴더 이름이 val
 
     vost = data_root / folders["vost"]
     for name in ("vost_00", "vost_01"):
@@ -70,6 +70,10 @@ def make_all(data_root: Path, folders: dict) -> None:
     (vost / "ImageSets").mkdir(parents=True, exist_ok=True)
     (vost / "ImageSets" / "val.txt").write_text("vost_00\nvost_01\n")
 
-    for key, ignore in (("m3vos", True), ("pumavos", False)):
-        root = data_root / folders[key]
-        make_video(root / "JPEGImages", root / "Annotations", f"{key}_00", ignore=ignore)
+    m3vos = data_root / folders["m3vos"] / "data"                          # Hugging Face 모양
+    make_video(m3vos / "JPEGImages", m3vos / "Annotations", "m3vos_00")
+    (m3vos / "ImageSets").mkdir(parents=True, exist_ok=True)
+    (m3vos / "ImageSets" / "val.txt").write_text("m3vos_00\n")
+
+    pumavos = data_root / folders["pumavos"]
+    make_video(pumavos / "JPEGImages", pumavos / "Annotations", "pumavos_00")

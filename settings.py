@@ -71,8 +71,3 @@ EXTRA_CROSSING_BOX_IOU = 0.1             # 교차: 다른 객체 상자와 이�
 # ── MOSEv2 서버 제출 ──────────────────────────────────────────────────
 MOSEV2_SUBMIT_EXTRAS = False             # True 면 [추가] 비교군도 제출 파일을 만듦 (+9번)
 MOSEV2_ZIP_INNER_FOLDER = "Annotations"  # zip 안 폴더 이름 ("" 면 영상 폴더가 맨 위)
-
-# ── 신뢰구간 ─────────────────────────────────────────────────────────
-BOOTSTRAP_SAMPLES = 2000
-CI_LEVEL = 0.95
-BOOTSTRAP_SEED = 0
