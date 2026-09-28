@@ -1,0 +1,78 @@
+"""[1] 데이터셋마다 영상·객체·전환 시점(A, B) 목록을 만들어 파일로 고정한다.
+
+    python scripts/1_make_video_list.py                          # 전부
+    python scripts/1_make_video_list.py --datasets lvos_v2_train vost_val
+
+결과: outputs/lists/<데이터셋>.json
+  객체 시작 = 정답에서 처음 보인 프레임, 끝 = 영상 마지막 프레임.
+  train 데이터셋은 영상마다 fit / dev 표시.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import settings  # noqa: E402
+from benchmark.data import DATASETS, load_dataset, video_list_path  # noqa: E402
+from benchmark.data.common import object_ids  # noqa: E402
+from benchmark.data.split import part_of  # noqa: E402
+from benchmark.switches import switch_points_a, switch_points_b  # noqa: E402
+
+
+def scan_visibility(video) -> dict[int, dict[int, bool]]:
+    """정답 PNG를 모두 읽어 {객체: {정답 프레임: 보이는가}} 를 만든다."""
+    present = {}
+    for frame in sorted(video.mask_paths):
+        labels, _ = video.read_labels(frame)
+        present[frame] = set(object_ids(labels))
+    all_ids = sorted(set().union(*present.values())) if present else []
+    return {obj: {f: obj in ids for f, ids in present.items()} for obj in all_ids}
+
+
+def make_list(dataset: str) -> dict:
+    videos = load_dataset(dataset)
+    entries, skipped = [], 0
+    for i, video in enumerate(videos, 1):
+        end = video.num_frames - 1
+        objects = []
+        for obj_id, visible in scan_visibility(video).items():
+            start = min(f for f, v in visible.items() if v)
+            if end - start < settings.MIN_TRACK_FRAMES:
+                skipped += 1
+                continue
+            switches = switch_points_a(start, end)
+            if video.has_full_gt:
+                switches += switch_points_b(visible, start, end)
+            objects.append({"object": obj_id, "start": start, "end": end, "switches": switches})
+        entries.append({
+            "video": video.name,
+            "num_frames": video.num_frames,
+            "part": part_of(video.name) if dataset in settings.TRAIN_DATASETS else None,
+            "objects": objects,
+        })
+        if i % 50 == 0 or i == len(videos):
+            print(f"  {dataset}: {i}/{len(videos)}")
+    return {"dataset": dataset, "has_full_gt": bool(videos and videos[0].has_full_gt),
+            "skipped_short_objects": skipped, "videos": entries}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--datasets", nargs="*", default=list(DATASETS))
+    args = parser.parse_args()
+    for dataset in args.datasets:
+        data = make_list(dataset)
+        path = video_list_path(dataset)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        n_obj = sum(len(v["objects"]) for v in data["videos"])
+        n_b = sum(sw["set"] == "B" for v in data["videos"] for o in v["objects"] for sw in o["switches"])
+        print(f"{dataset}: 영상 {len(data['videos'])}, 객체 {n_obj}, 전환 B {n_b}, "
+              f"짧아서 뺀 객체 {data['skipped_short_objects']} → {path}")
+
+
+if __name__ == "__main__":
+    main()
