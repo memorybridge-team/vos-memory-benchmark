@@ -20,5 +20,18 @@ def load(split: str = "val"):
                                names=names, ignore_value=IGNORE_VALUE, has_full_gt=True)
 
 
+def load_labels(split: str = "val") -> dict:
+    """[추가] 공식 라벨 파일은 없다 (VOST.zip 안에 목록·영상·정답뿐).
+    대신 공식 영상 이름이 '<번호>_<동작>_<물체>' (예: 3545_break_egg) 라서 동작을 라벨로 쓴다.
+    영상 단위 → {영상: {"*": ["변형:break"]}}
+    """
+    labels = {}
+    for name in read_names(dataset_root("vost") / "ImageSets" / f"{split}.txt"):
+        parts = name.split("_")
+        if len(parts) >= 3:
+            labels[name] = {"*": [f"변형:{parts[1]}"]}
+    return labels
+
+
 if __name__ == "__main__":
     print_first_video(load("val"))

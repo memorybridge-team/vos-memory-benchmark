@@ -5,11 +5,12 @@
 읽는 것: outputs/records/*.jsonl, outputs/mosev2/server_rows.jsonl (있으면)
 만드는 것 (outputs/tables/):
   main.md      주 표: 확정 비교군 10개 × 전환 A. J&F·J·회복률 (영상 전체 열 / 전환 뒤 열) + 비용
-  extra.md     추가 표: [추가] 비교군, [추가] 지표, [추가] 조건별
+  extra.md     추가 표: [추가] 비교군, [추가] 지표, [추가] 조건별, [추가] 공식 라벨별 (데이터셋별 + 합친 것)
   switch_b.md  전환 B 표 (재등장 직전)
 점수는 100점 만점, 영상 평균 (VOS 벤치마크 관례대로 숫자 하나). MOSEv2 와 비교할 때는 영상 전체 열만 쓴다.
 """
 
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import settings  # noqa: E402
 from benchmark import records  # noqa: E402
 from benchmark.methods import EXTRA, MAIN, METHODS  # noqa: E402
-from benchmark.scoring import extra_metrics, extra_strata, mosev2_server  # noqa: E402
+from benchmark.scoring import extra_labels, extra_metrics, extra_strata, mosev2_server  # noqa: E402
 from benchmark.scoring.retention import retention_by_video, video_means  # noqa: E402
 
 
@@ -125,8 +126,41 @@ def strata_tables(rows: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def load_object_labels() -> dict:
+    """[추가] (데이터셋, 영상, 객체) → 공식 라벨. 1_make_video_list.py 가 목록에 적어 둔 것."""
+    labels = {}
+    for path in sorted((Path(settings.OUTPUT_ROOT) / "lists").glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for entry in data["videos"]:
+            for obj in entry["objects"]:
+                labels[(data["dataset"], entry["video"], obj["object"])] = obj.get("extra_labels", [])
+    return labels
+
+
+def label_table(rows: list[dict], labels_of_row) -> str:
+    """[추가] 라벨마다 확정 비교군의 회복률 (전환 뒤 기준). 라벨이 붙은 영상만 모아 계산."""
+    lines = []
+    for label in sorted({label for r in rows for label in labels_of_row(r)}):
+        chosen = [r for r in rows if label in labels_of_row(r)]
+        replay = [r for r in chosen if r["method"] == "full_replay"]
+        cells = []
+        for m in MAIN:
+            ratios, _ = retention_by_video([r for r in chosen if r["method"] == m.name],
+                                           replay, "jf_post")
+            cells.append(fmt(mean(ratios.values())))
+        lines.append([label, str(len({r["video"] for r in chosen}))] + cells)
+    if not lines:
+        return "(라벨 없음)"
+    return markdown(["라벨", "영상 수"] + [m.label for m in MAIN], lines)
+
+
 def main():
     rows = load_rows()
+    object_labels = load_object_labels()
+
+    def raw_labels(r):
+        return object_labels.get((r["dataset"], r["video"], r["object"]), [])
+
     groups = defaultdict(list)
     for r in rows:
         groups[(r["dataset"], r.get("part"))].append(r)
@@ -147,10 +181,26 @@ def main():
         extra_md += [f"## {title}\n",
                      "### [추가] 비교군 (전환 A)\n", method_table(a_rows, EXTRA), "",
                      "### [추가] 지표 (전환 A, 전환 뒤 구간, 영상 평균)\n", extra_metric_table(a_rows), "",
-                     "### [추가] 조건별 (전환 A)\n", strata_tables(a_rows), ""]
+                     "### [추가] 조건별 (전환 A)\n", strata_tables(a_rows), "",
+                     "### [추가] 공식 라벨별 (전환 A, 전환 뒤 기준 회복률)\n",
+                     label_table(a_rows, raw_labels), ""]
 
         if b_rows:
             b_md += [f"## {title}\n", method_table(b_rows, METHODS), ""]
+
+    # [추가] 여러 데이터셋에서 같은 뜻인 라벨을 합친 표 (평가 데이터셋만, train 은 뺌).
+    # 영상 이름이 데이터셋끼리 겹칠 수 있어 "데이터셋/영상" 으로 구분한다.
+    pooled = []
+    for r in rows:
+        if r["switch_set"] != "A" or r.get("part") is not None:
+            continue
+        merged = sorted({name for label in raw_labels(r)
+                         if (name := extra_labels.common_name(r["dataset"], label))})
+        if merged:
+            pooled.append(dict(r, video=f"{r['dataset']}/{r['video']}", merged_labels=merged))
+    extra_md += ["## [추가] 여러 데이터셋 합친 라벨 (전환 A, 전환 뒤 기준 회복률)\n",
+                 "합치는 규칙은 benchmark/scoring/extra_labels.py 의 SAME_AS.\n",
+                 label_table(pooled, lambda r: r["merged_labels"]), ""]
 
     out_dir = Path(settings.OUTPUT_ROOT) / "tables"
     out_dir.mkdir(parents=True, exist_ok=True)

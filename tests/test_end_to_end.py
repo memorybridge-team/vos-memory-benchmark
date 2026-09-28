@@ -110,6 +110,13 @@ def check_tables() -> None:
     assert "회복률 전체" in main_md and "회복률 전환 뒤" in main_md
     assert "## mosev2_valid" in main_md and "## lvos_v2_train (dev)" in main_md
     assert "ID 뒤바뀜" in extra_md and "가림" in extra_md
+    # [추가] 공식 라벨: 데이터셋별 표 + 합친 표
+    for label in ("| OCC 가림 |", "| FM 빠른 움직임 |", "| 변형:break |", "| 상태 변화:melt |",
+                  "| 상태:solid→liquid |"):
+        assert label in extra_md, label
+    merged = extra_md.split("## [추가] 여러 데이터셋 합친 라벨")[1]
+    merged_line = next(line for line in merged.splitlines() if line.startswith("| 모양·상태 변화 |"))
+    assert merged_line.split("|")[2].strip() == "4", merged_line   # lval_00(DEF) + VOST 2 + M3VOS 1
     assert "## lvos_v2_valid" in b_md and "## mosev2_valid" not in b_md
     mose = main_md.split("## mosev2_valid")[1].split("##")[0]
     replay_line = next(line for line in mose.splitlines() if line.startswith("| Full Replay |"))

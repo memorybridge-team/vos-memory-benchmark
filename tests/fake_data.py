@@ -6,6 +6,7 @@
 무시 영역 오른쪽 아래 구석 (값 255, 회색)
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -63,17 +64,28 @@ def make_all(data_root: Path, folders: dict) -> None:
     split_layout("mosev2", "valid", ["mval_00", "mval_01"], first_frame_only=True)
     split_layout("lvos_v2", "train", [f"ltrain_{i:02d}" for i in range(10)])
     split_layout("lvos_v2", "val", ["lval_00", "lval_01", "lval_02"])      # LVOS v2 는 폴더 이름이 val
+    # LVOS 공식 속성 파일 (README 모양)
+    attributes = {"lval_00": ["OCC", "DEF"], "lval_01": ["FM"], "lval_02": ["OCC"]}
+    (data_root / folders["lvos_v2"] / "val" / "val_meta_attribute.json").write_text(json.dumps(
+        {"videos": {v: {"attributes": a, "objects": {}} for v, a in attributes.items()}}))
 
-    vost = data_root / folders["vost"]
-    for name in ("vost_00", "vost_01"):
+    vost = data_root / folders["vost"]                                     # 공식 이름: 번호_동작_물체
+    vost_names = ["101_cut_carrot", "102_break_egg"]
+    for name in vost_names:
         make_video(vost / "JPEGImages", vost / "Annotations", name, ignore=True)
     (vost / "ImageSets").mkdir(parents=True, exist_ok=True)
-    (vost / "ImageSets" / "val.txt").write_text("vost_00\nvost_01\n")
+    (vost / "ImageSets" / "val.txt").write_text("\n".join(vost_names) + "\n")
 
-    m3vos = data_root / folders["m3vos"] / "data"                          # Hugging Face 모양
-    make_video(m3vos / "JPEGImages", m3vos / "Annotations", "m3vos_00")
+    m3vos_root = data_root / folders["m3vos"]                              # Hugging Face 모양
+    m3vos = m3vos_root / "data"
+    make_video(m3vos / "JPEGImages", m3vos / "Annotations", "0001_melt_ice_1")
     (m3vos / "ImageSets").mkdir(parents=True, exist_ok=True)
-    (m3vos / "ImageSets" / "val.txt").write_text("m3vos_00\n")
+    (m3vos / "ImageSets" / "val.txt").write_text("0001_melt_ice_1\n")
+    (m3vos_root / "meta").mkdir(parents=True, exist_ok=True)
+    state = {"before_state": "solid:non_particulate:rigid body", "after_state": "liquid:fluid",
+             "phase transition": "melt"}
+    (m3vos_root / "meta" / "all_phase_transition.json").write_text(json.dumps(
+        {"0001_melt_ice_1": {"1": state, "2": state}}))
 
     pumavos = data_root / folders["pumavos"]
     make_video(pumavos / "JPEGImages", pumavos / "Annotations", "pumavos_00")

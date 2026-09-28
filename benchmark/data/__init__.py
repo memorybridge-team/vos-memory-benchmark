@@ -2,6 +2,7 @@
 
     load_dataset("lvos_v2_valid")     → [Video, ...]
     load_video_list("lvos_v2_valid")  → 1_make_video_list.py 가 고정해 둔 영상·객체·전환 시점 목록
+    load_labels("lvos_v2_valid")      → [추가] 데이터셋 공식 라벨 (있는 데이터셋만)
 """
 
 from __future__ import annotations
@@ -28,6 +29,18 @@ def load_dataset(name: str):
     module_name, split = DATASETS[name]
     module = importlib.import_module(f"benchmark.data.{module_name}")
     return module.load(split)
+
+
+def load_labels(name: str) -> dict:
+    """[추가] 데이터셋 공식 라벨 {영상: {객체 번호 또는 "*"(영상 전체): [라벨, ...]}}. 없으면 빈 dict."""
+    module_name, split = DATASETS[name]
+    module = importlib.import_module(f"benchmark.data.{module_name}")
+    return module.load_labels(split) if hasattr(module, "load_labels") else {}
+
+
+def labels_of(labels: dict, video: str, obj_id: int) -> list[str]:
+    per_video = labels.get(video, {})
+    return per_video.get("*", []) + per_video.get(obj_id, [])
 
 
 def video_list_path(name: str) -> Path:
