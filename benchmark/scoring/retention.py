@@ -26,12 +26,12 @@ def video_means(rows: list[dict], key: str) -> dict[str, float]:
     return {video: sum(v) / len(v) for video, v in values.items()}
 
 
-def retention_by_video(method_rows: list[dict], replay_rows: list[dict], key: str):
+def retention_by_video(baseline_rows: list[dict], replay_rows: list[dict], key: str):
     """영상 → 회복률(%). 두 번째 값은 Full Replay 가 0이라 뺀 영상 수."""
-    method = video_means(method_rows, key)
+    baseline = video_means(baseline_rows, key)
     replay = video_means(replay_rows, key)
     ratios, dropped = {}, 0
-    for video, score in method.items():
+    for video, score in baseline.items():
         base = replay.get(video)
         if base is None:
             continue

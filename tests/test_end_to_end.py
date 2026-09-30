@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import settings  # noqa: E402
 from benchmark import records  # noqa: E402
 from benchmark.data import load_dataset, load_video_list  # noqa: E402
-from benchmark.methods import EXTRA, MAIN, METHODS  # noqa: E402
+from benchmark.baselines import EXTRA, MAIN, BASELINES  # noqa: E402
 from benchmark.model import sam2_check, sam2_runner  # noqa: E402
 from benchmark.scoring.retention import retention_by_video  # noqa: E402
 
@@ -59,25 +59,25 @@ def check_rows(dataset: str, part=None) -> None:
         assert part is None or entry["part"] == part, entry
         for obj in entry["objects"]:
             for sw in obj["switches"]:
-                got = {r["method"] for r in rows if r["video"] == entry["video"]
+                got = {r["baseline"] for r in rows if r["video"] == entry["video"]
                        and r["object"] == obj["object"] and r["switch_name"] == sw["name"]}
-                assert got == {m.name for m in METHODS}, (dataset, entry["video"], sw, got)
+                assert got == {m.name for m in BASELINES}, (dataset, entry["video"], sw, got)
     for r in rows:
         assert r["jf_whole"] is not None and r["n_frames_whole"] > 0, r
         assert r["reseen_frames"] >= 0 and r["seconds_to_first_frame"] >= 0
-        if r["method"] != "reset":
+        if r["baseline"] != "reset":
             assert r["jf_whole"] > 0.3, r
-    replay = [r for r in rows if r["method"] == "full_replay"]
+    replay = [r for r in rows if r["baseline"] == "full_replay"]
     for key in ("jf_whole", "jf_post"):
         ratios, _ = retention_by_video(replay, replay, key)
         assert ratios and all(abs(v - 100) < 1e-9 for v in ratios.values())
-        direct, _ = retention_by_video([r for r in rows if r["method"] == "direct_state_copy"],
+        direct, _ = retention_by_video([r for r in rows if r["baseline"] == "direct_state_copy"],
                                        replay, key)
         assert direct, f"{dataset}: 회복률 {key} 없음"
     assert any(r["switch_set"] == "B" for r in rows), f"{dataset}: 전환 B 없음"
     assert any(r["extra_stratum_occlusion"] for r in rows), f"{dataset}: 가림 분류 없음"
-    small = [r["jf_post"] for r in rows if r["method"] == "source_only" and r["jf_post"]]
-    base = [r["jf_post"] for r in rows if r["method"] == "full_replay" and r["jf_post"]]
+    small = [r["jf_post"] for r in rows if r["baseline"] == "source_only" and r["jf_post"]]
+    base = [r["jf_post"] for r in rows if r["baseline"] == "full_replay" and r["jf_post"]]
     assert sum(base) / len(base) > sum(small) / len(small), "가짜 Base+ 가 Small 보다 좋아야 함"
     print(f"  OK {dataset}: 줄 {len(rows)}개")
 
@@ -94,7 +94,7 @@ def check_mosev2() -> None:
     csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     run_script("4_mosev2_scores.py", "--csv", str(csv_path))
     server = records.read_rows(Path(settings.OUTPUT_ROOT) / "mosev2" / "server_rows.jsonl")
-    assert {r["method"] for r in server} == {m.name for m in MAIN}
+    assert {r["baseline"] for r in server} == {m.name for m in MAIN}
     print(f"  OK mosev2_valid: 제출 {len(zips)}개, 서버 줄 {len(server)}개")
 
 

@@ -19,7 +19,7 @@ import numpy as np
 
 import settings
 from benchmark import cost
-from benchmark.methods import METHODS, no_handoff
+from benchmark.baselines import BASELINES, no_handoff
 from benchmark.model.memory import HandoffPackage
 from benchmark.scoring import extra_metrics, extra_strata, jf
 
@@ -132,11 +132,11 @@ def _jf_columns(scores: list, suffix: str) -> dict:
             f"n_frames_{suffix}": len(scores)}
 
 
-def _row(video, obj, sw, method, part, small_run, post_run, cost_info, strata) -> dict:
+def _row(video, obj, sw, baseline, part, small_run, post_run, cost_info, strata) -> dict:
     s = sw["frame"]
     row = {"dataset": video.dataset, "part": part, "video": video.name, "object": obj["object"],
            "switch_set": sw["set"], "switch_name": sw["name"], "switch_frame": s,
-           "start": obj["start"], "end": obj["end"], "method": method.name, "role": method.role}
+           "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role}
     if video.has_full_gt:
         # 영상 전체 기준: 프롬프트 프레임 다음 ~ 전환 프레임은 Small, 그 뒤는 방법의 결과.
         pre = {f: sc for f, sc in small_run.scores.items() if obj["start"] < f <= s}
@@ -172,22 +172,22 @@ def evaluate_object(video, obj, small, base, stats, part=None, saver=None) -> li
         s = sw["frame"]
         pkg = packages[s]
         strata = extra_strata.classify(profile, video, s) if profile is not None else {}
-        for method in METHODS:
-            if method.name == "source_only":
+        for baseline in BASELINES:
+            if baseline.name == "source_only":
                 run = small_run
                 cost_info = cost.cost_columns(run.times, run.setup_seconds, s, 0,
                                               run.peak_vram_mb, keeps_running=True)
-            elif method.name == "full_replay":
+            elif baseline.name == "full_replay":
                 run = replay_run
                 cost_info = cost.cost_columns(run.times, run.setup_seconds, s,
                                               no_handoff.full_replay_reseen(s, start),
                                               run.peak_vram_mb)
             else:
                 run = _run_base(base, video, obj,
-                                lambda session: method.prepare(session, pkg, stats),
+                                lambda session: baseline.prepare(session, pkg, stats),
                                 keep_after=s, scorer=scorer, saver=saver,
-                                folder=f"{method.name}__{sw['name']}")
+                                folder=f"{baseline.name}__{sw['name']}")
                 cost_info = cost.cost_columns(run.times, run.setup_seconds, s, run.reseen,
                                               run.peak_vram_mb)
-            rows.append(_row(video, obj, sw, method, part, small_run, run, cost_info, strata))
+            rows.append(_row(video, obj, sw, baseline, part, small_run, run, cost_info, strata))
     return rows

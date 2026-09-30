@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmark import records  # noqa: E402
-from benchmark.methods import BY_NAME, METHODS  # noqa: E402
+from benchmark.baselines import BY_NAME, BASELINES  # noqa: E402
 from benchmark.scoring import mosev2_server, retention  # noqa: E402
 
 ALL_VIDEOS = "ALL"
@@ -44,12 +44,12 @@ def main():
     rows = []
     with open(args.csv, encoding="utf-8-sig") as f:
         for line in csv.DictReader(f):
-            for method, switch_name in mosev2_server.parse_submission(line["submission"].strip()):
+            for baseline, switch_name in mosev2_server.parse_submission(line["submission"].strip()):
                 rows.append({
                     "dataset": "mosev2_valid", "part": None,
                     "video": (line.get("video") or "").strip() or ALL_VIDEOS, "object": "all",
                     "switch_set": "A", "switch_name": switch_name,
-                    "method": method, "role": BY_NAME[method].role,
+                    "baseline": baseline, "role": BY_NAME[baseline].role,
                     "jf_whole": _score(line.get("jf")), "j_whole": _score(line.get("j")),
                     "f_whole": _score(line.get("f")), "source": "server",
                 })
@@ -59,10 +59,10 @@ def main():
     records.append_rows(out, rows)
     print(f"저장: {out} ({len(rows)}줄)\n")
 
-    replay_rows = [r for r in rows if r["method"] == "full_replay"]
+    replay_rows = [r for r in rows if r["baseline"] == "full_replay"]
     print("회복률 (영상 전체 기준, 영상마다 비율 → 평균)")
-    for m in METHODS:
-        m_rows = [r for r in rows if r["method"] == m.name]
+    for m in BASELINES:
+        m_rows = [r for r in rows if r["baseline"] == m.name]
         if not m_rows:
             continue
         ratios, dropped = retention.retention_by_video(m_rows, replay_rows, "jf_whole")

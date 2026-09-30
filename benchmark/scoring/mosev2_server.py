@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 import settings
-from benchmark.methods import MAIN, EXTRA
+from benchmark.baselines import MAIN, EXTRA
 
 
 def mosev2_root() -> Path:
@@ -54,9 +54,9 @@ def switch_names() -> list[str]:
 
 def submission_list() -> list[tuple[str, str, str | None]]:
     """[(제출 이름, 비교군, 전환 이름)] — Source-only 는 전환 이름 None."""
-    methods = MAIN + (EXTRA if settings.MOSEV2_SUBMIT_EXTRAS else [])
+    baselines = MAIN + (EXTRA if settings.MOSEV2_SUBMIT_EXTRAS else [])
     subs = []
-    for m in methods:
+    for m in baselines:
         if m.name == "source_only":
             subs.append(("source_only", m.name, None))
         else:
@@ -64,16 +64,16 @@ def submission_list() -> list[tuple[str, str, str | None]]:
     return subs
 
 
-def _folder_for(method: str, switch_name: str | None, obj: dict, frame: int) -> str:
+def _folder_for(baseline: str, switch_name: str | None, obj: dict, frame: int) -> str:
     """이 객체의 이 프레임 마스크를 어느 폴더에서 가져올지."""
-    if method == "source_only":
+    if baseline == "source_only":
         return "small"
     s = next(sw["frame"] for sw in obj["switches"] if sw["name"] == switch_name)
     if frame <= s:
         return "small"
-    if method == "full_replay":
+    if baseline == "full_replay":
         return "full_replay"
-    return f"{method}__{switch_name}"
+    return f"{baseline}__{switch_name}"
 
 
 def _default_palette() -> list[int]:
@@ -82,7 +82,7 @@ def _default_palette() -> list[int]:
     return [c for rgb in colors for c in rgb]
 
 
-def build_submission(name, method, switch_name, video_list, videos, saver, out_root) -> Path:
+def build_submission(name, baseline, switch_name, video_list, videos, saver, out_root) -> Path:
     """객체들을 한 장으로 합친다. 겹치면 번호 작은 객체가 이긴다 (SAM2 공식 평가 코드와 같은 규칙)."""
     folder = Path(out_root) / name
     inner = folder / settings.MOSEV2_ZIP_INNER_FOLDER if settings.MOSEV2_ZIP_INNER_FOLDER else folder
@@ -97,7 +97,7 @@ def build_submission(name, method, switch_name, video_list, videos, saver, out_r
             for obj in objects:
                 if frame < obj["start"]:
                     continue
-                src = _folder_for(method, switch_name, obj, frame)
+                src = _folder_for(baseline, switch_name, obj, frame)
                 mask = saver.load(src, video.name, obj["object"], video.frame_name(frame))
                 if mask is not None:
                     canvas[mask] = obj["object"]
@@ -111,8 +111,8 @@ def build_submission(name, method, switch_name, video_list, videos, saver, out_r
 def build_submissions(video_list, videos, saver) -> list[Path]:
     out_root = mosev2_root() / "submissions"
     zips = []
-    for name, method, switch_name in submission_list():
-        zips.append(build_submission(name, method, switch_name, video_list, videos, saver, out_root))
+    for name, baseline, switch_name in submission_list():
+        zips.append(build_submission(name, baseline, switch_name, video_list, videos, saver, out_root))
         print(f"  제출 파일: {zips[-1]}")
     return zips
 
@@ -120,6 +120,6 @@ def build_submissions(video_list, videos, saver) -> list[Path]:
 def parse_submission(name: str) -> list[tuple[str, str]]:
     """제출 이름 → [(비교군, 전환 이름)]. Source-only 는 모든 전환 시점에 같은 점수."""
     if "__" in name:
-        method, sw = name.split("__", 1)
-        return [(method, sw)]
+        baseline, sw = name.split("__", 1)
+        return [(baseline, sw)]
     return [(name, sw) for sw in switch_names()]

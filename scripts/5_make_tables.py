@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import settings  # noqa: E402
 from benchmark import records  # noqa: E402
-from benchmark.methods import EXTRA, MAIN, METHODS  # noqa: E402
+from benchmark.baselines import EXTRA, MAIN, BASELINES  # noqa: E402
 from benchmark.scoring import extra_labels, extra_metrics, extra_strata, mosev2_server  # noqa: E402
 from benchmark.scoring.retention import retention_by_video, video_means  # noqa: E402
 
@@ -52,15 +52,15 @@ def markdown(header: list[str], lines: list[list[str]]) -> str:
     return "\n".join(out)
 
 
-def method_table(rows: list[dict], methods) -> str:
+def baseline_table(rows: list[dict], baselines) -> str:
     """비교군 × (영상 전체 / 전환 뒤) J&F·J·회복률 + 비용."""
-    replay = [r for r in rows if r["method"] == "full_replay"]
+    replay = [r for r in rows if r["baseline"] == "full_replay"]
     header = ["비교군", "J&F 전체", "J 전체", "회복률 전체",
               "J&F 전환 뒤", "J 전환 뒤", "회복률 전환 뒤",
               "다시 본 프레임", "첫 프레임까지(초)", "전환 뒤 프레임당(초)", "최대 VRAM(MB)", "영상 수"]
     lines = []
-    for m in methods:
-        mine = [r for r in rows if r["method"] == m.name]
+    for m in baselines:
+        mine = [r for r in rows if r["baseline"] == m.name]
         if not mine:
             continue
         ret_whole, _ = retention_by_video(mine, replay, "jf_whole")
@@ -94,8 +94,8 @@ def extra_metric_table(rows: list[dict]) -> str:
     scale = {"extra_jf_at_n": 100, "extra_switch_shock": 100, "extra_id_switch_rate": 100,
              "extra_recovery_frames": 1, "extra_absent_false_alarm": 100, "extra_failure": 100}
     lines = []
-    for m in METHODS:
-        mine = [r for r in rows if r["method"] == m.name]
+    for m in BASELINES:
+        mine = [r for r in rows if r["baseline"] == m.name]
         if not mine:
             continue
         cells = []
@@ -109,10 +109,10 @@ def strata_tables(rows: list[dict]) -> str:
     parts = []
     for key in extra_strata.KEYS:
         chosen = [r for r in rows if r.get(key)]
-        replay = [r for r in chosen if r["method"] == "full_replay"]
+        replay = [r for r in chosen if r["baseline"] == "full_replay"]
         lines = []
-        for m in METHODS:
-            mine = [r for r in chosen if r["method"] == m.name]
+        for m in BASELINES:
+            mine = [r for r in chosen if r["baseline"] == m.name]
             if not mine:
                 continue
             ratios, _ = retention_by_video(mine, replay, "jf_post")
@@ -142,10 +142,10 @@ def label_table(rows: list[dict], labels_of_row) -> str:
     lines = []
     for label in sorted({label for r in rows for label in labels_of_row(r)}):
         chosen = [r for r in rows if label in labels_of_row(r)]
-        replay = [r for r in chosen if r["method"] == "full_replay"]
+        replay = [r for r in chosen if r["baseline"] == "full_replay"]
         cells = []
         for m in MAIN:
-            ratios, _ = retention_by_video([r for r in chosen if r["method"] == m.name],
+            ratios, _ = retention_by_video([r for r in chosen if r["baseline"] == m.name],
                                            replay, "jf_post")
             cells.append(fmt(mean(ratios.values())))
         lines.append([label, str(len({r["video"] for r in chosen}))] + cells)
@@ -176,17 +176,17 @@ def main():
         a_rows = [r for r in group if r["switch_set"] == "A"]
         b_rows = [r for r in group if r["switch_set"] == "B"]
 
-        main_md += [f"## {title}\n", method_table(a_rows, MAIN), ""]
+        main_md += [f"## {title}\n", baseline_table(a_rows, MAIN), ""]
 
         extra_md += [f"## {title}\n",
-                     "### [추가] 비교군 (전환 A)\n", method_table(a_rows, EXTRA), "",
+                     "### [추가] 비교군 (전환 A)\n", baseline_table(a_rows, EXTRA), "",
                      "### [추가] 지표 (전환 A, 전환 뒤 구간, 영상 평균)\n", extra_metric_table(a_rows), "",
                      "### [추가] 조건별 (전환 A)\n", strata_tables(a_rows), "",
                      "### [추가] 공식 라벨별 (전환 A, 전환 뒤 기준 회복률)\n",
                      label_table(a_rows, raw_labels), ""]
 
         if b_rows:
-            b_md += [f"## {title}\n", method_table(b_rows, METHODS), ""]
+            b_md += [f"## {title}\n", baseline_table(b_rows, BASELINES), ""]
 
     # [추가] 여러 데이터셋에서 같은 뜻인 라벨을 합친 표 (평가 데이터셋만, train 은 뺌).
     # 영상 이름이 데이터셋끼리 겹칠 수 있어 "데이터셋/영상" 으로 구분한다.

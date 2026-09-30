@@ -31,7 +31,7 @@ def main():
     videos = load_dataset(args.dataset)
     video = next(v for v in videos if args.video in (None, v.name))
     start = min(video.mask_paths)
-    obj_id = object_ids(video.read_labels(start)[0])[0]
+    obj_id = object_ids(video.read_labels(start)[0])[0] #[0]: 물체 번호 지도/[1] : 무시영역 - 검증용 코드
     cut = min(start + args.cut, video.num_frames - 2)
     last = min(cut + args.after, video.num_frames - 1)
     print(f"영상 {args.dataset}/{video.name}, 객체 {obj_id}, 프롬프트 {start}, 끊는 곳 {cut}, 끝 {last}\n")
