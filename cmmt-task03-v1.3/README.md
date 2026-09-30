@@ -18,6 +18,7 @@ runs, milestone notes, and one-time delivery/inventory checks.
 ## Contents
 
 - `reports/`: Task 03 final context, milestones, and raw onboarding evidence
+- `manifests/`: frozen external-evaluation manifests, including `vost_val_v1.json`
 - `tools/`: one-time VOST, PUMaVOS, and M3-VOS delivery/integrity utilities
 - `tests/`: tests for the moved delivery-inventory utilities
 
