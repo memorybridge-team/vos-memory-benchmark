@@ -37,8 +37,26 @@ dev 영상 × 객체 × 전환 시점(25 / 50 / 75%)마다:
 3. 학습 중인 translator로 그 기억을 Base+ 형식으로 바꾼다.
 4. 바꾼 기억을 Base+에 넣고 s+1부터 영상 끝까지 추적한다.
 5. 전환 뒤(s+1 ~ 끝)에서 **정답에 객체가 보이는 프레임만** J와 F를 계산한다. J&F = (J + F) ÷ 2
+   → `post_switch_jf(예측 마스크들, 정답 마스크들)`이 이 계산을 한다 (아래 "J&F 계산" 참고).
 
 Full Replay와 **같은 영상, 같은 전환 프레임, 같은 채점 규칙**을 써야 한다.
+
+## J&F 계산 (`post_switch_jf`)
+
+DAVIS 공식 평가 코드와 같은 정의다. 1번(Full Replay)과 2번(학습 중인 모델) 모두 이 함수로 채점한다.
+
+```python
+from best_model import post_switch_jf
+
+jf = post_switch_jf(preds, gts)   # 전환 뒤 프레임들의 예측 마스크, 정답 마스크 (같은 순서·같은 길이)
+row = {"video": "abc", "fraction": 0.25, "jf": jf}
+```
+
+- 마스크는 True/False 2차원 배열 (객체 하나당 하나)
+- **J** = 겹친 넓이 ÷ 합친 넓이
+- **F** = 예측 테두리와 정답 테두리가 서로 가까운 정도. 이미지 대각선 × 0.008 픽셀 안이면 맞은 것으로 본다
+- 테두리는 마스크에서 함수 안에서 뽑으니 따로 넘기지 않는다
+- 정답에 객체가 보이는 프레임이 하나도 없으면 나눌 수 없어 에러가 난다 → 그런 객체·전환 시점은 줄을 만들지 않는다
 
 ## 점수 줄 형식
 
@@ -82,4 +100,4 @@ for epoch in range(n_epochs):
 ## 실행 조건
 
 - 학습 스크립트를 저장소 맨 위 폴더에서 실행해야 `from best_model import BestModel`이 된다.
-- torch가 깔려 있어야 한다.
+- torch, numpy, opencv-python(cv2)이 깔려 있어야 한다.
