@@ -1,0 +1,100 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1790727058006,
+  "projectRoot": "c:\\vos-memory-benchmark",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "feature/davis-baseline",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "benchmark": {
+      "path": "benchmark",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1790727057838,
+      "keyFiles": [
+        "cost.py",
+        "evaluate_video.py",
+        "moment_stats.py",
+        "records.py",
+        "switches.py"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1790727057839,
+      "keyFiles": [
+        "EXTRAS.md",
+        "PROTOCOL.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 6,
+      "lastAccessed": 1790727057840,
+      "keyFiles": [
+        "0_check_sam2.py",
+        "1_make_video_list.py",
+        "2_fit_moment_stats.py",
+        "3_evaluate.py",
+        "4_mosev2_scores.py"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 3,
+      "lastAccessed": 1790727057840,
+      "keyFiles": [
+        "fake_data.py",
+        "fake_sam2.py",
+        "test_end_to_end.py"
+      ]
+    },
+    "benchmark\\data": {
+      "path": "benchmark\\data",
+      "purpose": "Data files",
+      "fileCount": 8,
+      "lastAccessed": 1790727057841,
+      "keyFiles": [
+        "common.py",
+        "lvos_v2.py",
+        "m3vos.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

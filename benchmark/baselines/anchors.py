@@ -6,13 +6,16 @@ Original+Last-Visible  : 둘 다. (2장, 같은 프레임이면 1장)
 
 Base+ 는 프롬프트 프레임 이미지를 한 번씩 다시 봐야 기억으로 만들 수 있다 → 그만큼 "다시 본 프레임".
 """
+# session: Base+가 받을 것
+# pkg: 전환 할 때 Small에서 가져올 것
+# stats: Moment-Matched Copy에 쓸 평균, 표준편차
 
-
+# Original Prompt : memory bank없이 mask만 프롬프트로
 def original_prompt(session, pkg, stats):
     session.add_prompt(pkg.prompt_frame, pkg.prompt_mask)
     return pkg.switch_frame + 1, 1
 
-
+# Last Visible :
 def last_visible(session, pkg, stats):
     frame, mask = pkg.last_visible_or_prompt()
     session.add_prompt(frame, mask)

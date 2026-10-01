@@ -36,9 +36,9 @@ BASELINES = [
     Baseline("original_last_visible", "Original+Last-Visible", "main", anchors.original_last_visible),
     *[Baseline(f"original_replay_{k}", f"Original+Replay-{k}", "main", replay.make_replay(k))
       for k in settings.REPLAY_KS],
-    Baseline("reset", "[추가] reset", "extra", extra_diagnostic.reset),
-    Baseline("last_mask", "[추가] last_mask", "extra", extra_diagnostic.last_mask),
-    Baseline("recent_k_only", f"[추가] recent_{settings.EXTRA_RECENT_K}_only", "extra",
+    Baseline("reset", "[extra] reset", "extra", extra_diagnostic.reset),
+    Baseline("last_mask", "[extra] last_mask", "extra", extra_diagnostic.last_mask),
+    Baseline("recent_k_only", f"[extra] recent_{settings.EXTRA_RECENT_K}_only", "extra",
            extra_diagnostic.recent_k_only),
 ]
 
