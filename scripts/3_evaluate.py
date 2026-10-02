@@ -16,11 +16,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import settings  # noqa: E402
-from benchmark import moment_stats, records  # noqa: E402
-from benchmark.data import load_dataset, load_video_list  # noqa: E402
-from benchmark.evaluate_video import evaluate_object  # noqa: E402
-from benchmark.model import sam2_runner  # noqa: E402
-from benchmark.scoring import mosev2_server  # noqa: E402
+from baseline import moment_stats
+from evaluation import records  # noqa: E402
+from evaluation.data import load_dataset, load_video_list  # noqa: E402
+from evaluation.evaluate_video import evaluate_object  # noqa: E402
+from model import sam2_runner  # noqa: E402
+from evaluation.scoring import mosev2_server  # noqa: E402
 
 
 def main():

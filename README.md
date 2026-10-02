@@ -1,19 +1,29 @@
 # vos-memory-benchmark
 
-SAM2 Small → Base+ 기억 넘기기 평가. 설정 설명은 `docs/PROTOCOL.md`, 추가 항목은 `docs/EXTRAS.md`.
+SAM2 Small → Base+ 기억 넘기기 평가. 설정·주요 평가 지표는 `docs/PROTOCOL.md`, 보조 평가 지표는 `docs/EXTRAS.md`.
+
+## 폴더
+
+| 폴더 | 무엇 |
+|---|---|
+| `model/` | SAM2 켜기·추적·기억 꺼내기/넣기 (SAM2 내부를 건드리는 곳은 여기뿐) |
+| `baseline/` | 비교군: 전환 때 Base+ 에 무엇을 넘기나 (기억 상자, Moment-Matched 통계 포함) |
+| `evaluation/` | 평가: 데이터셋·전환 시점·영상 하나 평가·비용·결과 저장, `scoring/`(지표), `tables/`(표) |
+| `scripts/` | 사람이 실행하는 것 (번호 = 순서) |
+| `settings.py` | 모든 숫자·경로 |
 
 ## 준비
 
-1. SAM2 설치 (github.com/facebookresearch/sam2), `pip install numpy pillow opencv-python`
+1. SAM2 설치 (github.com/facebookresearch/sam2), `pip install numpy pillow opencv-python matplotlib`
 2. `settings.py` 에 `DATA_ROOT`, `DATA_FOLDERS`, `SAM2_CHECKPOINT_DIR` 적기
 3. 데이터가 읽히는지 확인 (영상 1개씩 프레임 수·객체 수·무시 영역 값 출력)
 
 ```bash
-python -m benchmark.data.mosev2
-python -m benchmark.data.lvos_v2
-python -m benchmark.data.vost
-python -m benchmark.data.m3vos
-python -m benchmark.data.pumavos
+python -m evaluation.data.mosev2
+python -m evaluation.data.lvos_v2
+python -m evaluation.data.vost
+python -m evaluation.data.m3vos
+python -m evaluation.data.pumavos
 ```
 
 ## 실행 순서
@@ -48,7 +58,7 @@ python scripts/4_mosev2_scores.py --csv mosev2_scores.csv
 python scripts/5_make_tables.py
 ```
 
-표: `outputs/tables/main.md` (주), `extra.md` (추가), `switch_b.md` (전환 B)
+표: `outputs/tables/main.md` (주요 평가 지표), `extra.md` (보조 평가 지표), `drift_<데이터셋>.png`
 
 ## 테스트 (GPU·데이터 없이, 가짜 모델·가짜 데이터)
 

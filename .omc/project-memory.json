@@ -95,6 +95,19 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "docs/PROTOCOL.md",
+      "accessCount": 2,
+      "lastAccessed": 1790960129795,
+      "type": "file"
+    },
+    {
+      "path": "docs/EXTRAS.md",
+      "accessCount": 1,
+      "lastAccessed": 1790960131016,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }

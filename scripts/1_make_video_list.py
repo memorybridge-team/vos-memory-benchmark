@@ -1,4 +1,4 @@
-"""[1] 데이터셋마다 영상·객체·전환 시점(A, B) 목록을 만들어 파일로 고정한다.
+"""[1] 데이터셋마다 영상·객체·전환 시점 목록을 만들어 파일로 고정한다.
 
     python scripts/1_make_video_list.py                          # 전부
     python scripts/1_make_video_list.py --datasets lvos_v2_train vost_val
@@ -6,7 +6,7 @@
 결과: outputs/lists/<데이터셋>.json
   객체 시작 = 정답에서 처음 보인 프레임, 끝 = 영상 마지막 프레임.
   train 데이터셋은 영상마다 fit / dev 표시.
-  [추가] 공식 라벨이 있는 데이터셋은 객체마다 "extra_labels" (scoring/extra_labels.py).
+  [추가] 공식 라벨이 있는 데이터셋은 객체마다 "extra_labels" (evaluation/scoring/extra_groups.py).
 """
 
 import argparse
@@ -17,10 +17,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import settings  # noqa: E402
-from benchmark.data import DATASETS, labels_of, load_dataset, load_labels, video_list_path  # noqa: E402
-from benchmark.data.common import object_ids  # noqa: E402
-from benchmark.data.split import part_of  # noqa: E402
-from benchmark.switches import switch_points_a, switch_points_b  # noqa: E402
+from evaluation.data import DATASETS, labels_of, load_dataset, load_labels, video_list_path  # noqa: E402
+from evaluation.data.common import object_ids  # noqa: E402
+from evaluation.data.split import part_of  # noqa: E402
+from evaluation.switches import switch_points  # noqa: E402
 
 
 def scan_visibility(video) -> dict[int, dict[int, bool]]:
@@ -45,10 +45,8 @@ def make_list(dataset: str) -> dict:
             if end - start < settings.MIN_TRACK_FRAMES:
                 skipped += 1
                 continue
-            switches = switch_points_a(start, end)
-            if video.has_full_gt:
-                switches += switch_points_b(visible, start, end)
-            objects.append({"object": obj_id, "start": start, "end": end, "switches": switches,
+            objects.append({"object": obj_id, "start": start, "end": end,
+                            "switches": switch_points(start, end),
                             "extra_labels": labels_of(labels, video.name, obj_id)})
         entries.append({
             "video": video.name,
@@ -72,8 +70,7 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         n_obj = sum(len(v["objects"]) for v in data["videos"])
-        n_b = sum(sw["set"] == "B" for v in data["videos"] for o in v["objects"] for sw in o["switches"])
-        print(f"{dataset}: 영상 {len(data['videos'])}, 객체 {n_obj}, 전환 B {n_b}, "
+        print(f"{dataset}: 영상 {len(data['videos'])}, 객체 {n_obj}, "
               f"짧아서 뺀 객체 {data['skipped_short_objects']} → {path}")
 
 

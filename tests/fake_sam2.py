@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 
 import settings
-from benchmark.model.sam2_runner import FrameOut
+from model.sam2_runner import FrameOut
 
 
 def _entry(color, mask: np.ndarray) -> dict:

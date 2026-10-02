@@ -1,71 +1,77 @@
-# extra
-"extra" 목록과 이유
+# extra (보조 평가 지표)
 
-## 전환 B — 재등장 직전
+주 표(`main.md`)에는 넣지 않고 추가 표(`outputs/tables/extra.md`)에만 나오는 것과 그 이유.
+코드: `evaluation/scoring/extra_metrics.py`, `extra_groups.py`, `baseline/extra_diagnostic.py`, 표는 `evaluation/tables/extra_tables.py`.
+결과 줄 열 이름은 모두 `extra_` 로 시작.
 
-| 무엇 | 이유 |
-|---|---|
-| 객체가 `SWITCH_B_MIN_ABSENT` 정답 프레임 이상 안 보이다가 다시 나타나기 바로 전 프레임에서 전환. 객체마다 안 보인 기간이 가장 긴 것 `SWITCH_B_PER_OBJECT` 개 | 기억이 가장 중요한 순간. 넘기자마자 "아까 그 물체"를 다시 찾아야 해서 방법 차이가 가장 크게 드러난다 |
+MOSEv2 valid 는 정답이 첫 프레임뿐이라 **비용 세부·출력 일치도·진단 비교군의 비용 열만** 있다.
 
-## 진단 비교군
-
-:실제로 쓰지는 않을 방법이지만, 다른 베이스라인에서 점수가 왜 그렇게 나왔는지 알아보는 용도
-
-| 이름 | 무엇 | 이유 |
-|---|---|---|
-| reset | 아무것도 안 넘김 → 전환 뒤 빈 마스크 | 바닥 점수 확인 |
-| last_mask | 전환 프레임의 Small 마스크만 (보이든 안 보이든) | Last-Visible 과 비교: "보이는 프레임을 골라 주는 것"의 효과 |
-| recent_k_only | 처음 정답 전달 없이, Small 마스크 한 장(s−K+1)에서 시작해 최근 K 프레임만 다시 봄 (`EXTRA_RECENT_K`) | Original+Replay-K 와 비교: "처음 정답"의 효과 |
-
-## 추가 지표 (전환 뒤 구간)
-
-| 열 | 무엇 | 이유 |
-|---|---|---|
-| extra_jf_at_n | 전환 뒤 처음 보이는 N 프레임의 J&F | 넘긴 직후 충격은 전체 평균에 묻힌다 |
-| extra_switch_shock | 전환 직전 보이는 N 프레임(Small)의 J&F | 넘기는 순간 점수가 떨어지는지 오르는지 |
-| extra_id_switch_rate | 예측이 자기보다 다른 객체와 더 겹친 프레임 비율 | 기억이 틀린 물체에 붙는 실패는 J 만으로 구분 안 됨 |
-| extra_recovery_frames | 처음 보이는 프레임부터 J ≥ 0.5 까지 걸린 프레임 | 처음에 흔들려도 곧 따라잡는지 |
-| extra_absent_false_alarm | 정답에 객체가 없는 프레임 중 무언가를 칠한 비율 | 영상 전체 기준에선 빈 프레임이 섞여 잘 안 보임 |
-| extra_failure | 전환 뒤 평균 J < 0.1 이면 1 | 완전히 놓친 경우가 몇 번인지 |
-
-## 조건별 분류 (정답만 보고, 전환 뒤 구간)
+## 비용 세부
 
 | 열 | 무엇 |
 |---|---|
-| extra_stratum_occlusion | 가림: 사라졌다 다시 나타남 |
-| extra_stratum_crossing | 교차: 다른 객체와 상자가 `EXTRA_CROSSING_BOX_IOU` 이상 겹침 |
-| extra_stratum_small | 작은 객체: 보이는 넓이 중앙값 < 화면의 `EXTRA_SMALL_AREA` |
-| extra_stratum_fast | 빠른 움직임: 프레임당 중심 이동 중앙값 > 대각선의 `EXTRA_FAST_MOTION` |
+| seconds_per_frame_after | 전환 뒤 프레임 한 장을 처리하는 데 걸린 평균 시간(초) |
+| peak_vram_mb | 그 실행 동안 GPU 메모리를 가장 많이 쓴 순간의 양(MB) |
 
-이유: 평균 하나로는 "어떤 상황에서 기억 넘기기가 무너지는지" 알 수 없다.
+## 실패 분석 (전환 뒤, 정답에 객체가 보이는 프레임)
 
-## 공식 라벨별 분류 (데이터셋이 준 라벨)
+| 열 | 무엇 | 이유 |
+|---|---|---|
+| extra_id_switch_rate | ID 뒤바뀜: 예측이 자기 물체보다 다른 물체와 더 많이 겹친 프레임 비율. 겹침 = IoU (겹친 넓이 ÷ 합친 넓이) | 기억이 틀린 물체에 붙는 실패는 J 만으로 구분 안 됨 |
+| extra_failure | 실패: 평균 J 가 `EXTRA_FAILURE_J`(0.1) 보다 낮으면 1 | 완전히 놓친 경우가 몇 번인지 |
 
-위 네 가지는 정답 그림으로 계산한 것이고, 이것은 데이터셋 제작자가 붙인 라벨을 그대로 쓴다.
-데이터셋마다 라벨이 달라서 **데이터셋별 표**를 따로 만들고, 뜻이 같은 것은 **합친 표**에 한 줄로 모은다.
+## 언제 잘 되고 언제 안 되는지
+
+### drift 곡선
+
+전환 뒤 경과 프레임 구간(`EXTRA_DRIFT_BINS`: 1~10, 11~50, 51~100, 101~300, 301~)마다
+(방법 J&F − 같은 전환의 Full Replay J&F) 를 구해 영상 평균 → 표 + `drift_<데이터셋>.png`.
+시간이 지나면서 Full Replay 와의 차이가 줄어드는지, 그대로인지, 커지는지 본다.
+결과 줄에는 구간별 J&F 목록(`extra_drift_jf`)만 남기고, 빼기는 표를 만들 때 한다.
+
+### 조건별 분류 (데이터셋 공식 라벨)
+
+데이터셋 제작자가 붙인 라벨마다 회복률(J&F, J)을 따로 계산한다. 데이터셋별 표 + 뜻이 같은 라벨을 합친 표.
 
 | 데이터셋 | 라벨 | 단위 | 어디서 |
 |---|---|---|---|
-| LVOS v2 | 영상 속성 13종 (OCC 가림, FM 빠른 움직임, DEF 모양 변형 ...) | 영상 | `<split>/*attribute*.json`. 논문에는 영상마다 붙였다고 나오고 README 에 파일 모양도 있지만, 공식 meta 다운로드 폴더에는 train/valid/test_meta.json 뿐이라 **배포되는지 미확인**. 없으면 LVOS 라벨 표는 비어서 나옴 |
+| LVOS v2 | 영상 속성 13종 (OCC 가림, FM 빠른 움직임, DEF 모양 변형 ...) | 영상 | `<split>/*attribute*.json` — **배포되는지 미확인** (아래) |
 | M3VOS | 상태 변화 종류 (`상태 변화:separate`), 변하기 전→후 (`상태:solid→liquid`) | 객체 | `meta/all_phase_transition.json` |
 | VOST | 동작 (`변형:break`) | 영상 | 라벨 파일이 없어 공식 영상 이름 `<번호>_<동작>_<물체>` 에서 꺼냄 |
-| MOSEv2, PUMaVOS | 없음 | | |
+| MOSEv2, PUMaVOS | 없음 → 제외 | | |
 
 - 라벨은 `1_make_video_list.py` 가 목록의 객체마다 `extra_labels` 로 적어 둔다.
-- 합치는 규칙: `benchmark/scoring/extra_labels.py` 의 `SAME_AS`. 지금은 LVOS `DEF 모양 변형` + VOST 전부 + M3VOS 전부 → `모양·상태 변화` 하나. 새로 합칠 라벨은 여기에 한 줄씩 적는다.
+- 합치는 규칙: `evaluation/scoring/extra_groups.py` 의 `SAME_AS`. 지금은 LVOS `DEF 모양 변형` + VOST 전부 + M3VOS 전부 → `모양·상태 변화` 하나. 새로 합칠 라벨은 여기에 한 줄씩 적는다.
 - 합친 표는 평가 데이터셋만 쓴다 (train 은 뺌).
 - 주의: 라벨은 영상·객체 전체에 붙어 있어서, 그 일이 **전환 뒤에** 일어났는지는 모른다.
 
-### ※ 미확인: LVOS v2 속성 파일 (2026-09-29)
-
-LVOS v2 공식 라벨 파일이 실제로 있는지 아직 확인하지 못했다.
+#### ※ 미확인: LVOS v2 속성 파일 (2026-09-29)
 
 - 있다고 볼 근거: LVOS 논문 Table II 에 영상마다 속성 13종을 붙였다고 나오고, README 에 `x_meta_attribute.json` 모양이 설명돼 있다.
-- 없을 수 있는 근거: README 가 안내하는 공식 meta 다운로드 폴더에는 `train_meta.json`, `valid_meta.json`, `test_meta.json` 세 개뿐이다 (객체 등장 구간만 담음). 영상 zip (`train.zip`, `valid.zip`) 안에 있는지는 못 봤다.
+- 없을 수 있는 근거: 공식 meta 다운로드 폴더에는 `train_meta.json`, `valid_meta.json`, `test_meta.json` 세 개뿐이다.
 - 확인 방법: LVOS v2 를 서버에 받은 뒤 `find <LVOSv2 폴더> -iname "*attribute*"`
-- 없으면: 코드는 멈추지 않는다. LVOS 공식 라벨 표는 "(라벨 없음)" 으로 나오고, 합친 표에서 LVOS 몫이 빠진다.
-- 있는데 모양이 README 와 다르면: `benchmark/data/lvos_v2.py` 의 `load_labels()` 를 고친다.
+- 없으면: 코드는 멈추지 않는다. LVOS 라벨 표는 "(없음)" 으로 나오고, 합친 표에서 LVOS 몫이 빠진다.
+- 있는데 모양이 README 와 다르면: `evaluation/data/lvos_v2.py` 의 `load_labels()` 를 고친다.
 
-**코드 돌리기 전에 꼭 확인하기**
+### 입력 길이별 분류
 
-모든 추가 항목은 정답이 모든 프레임에 있어야 해서 MOSEv2 valid 에는 없다.
+전환 전 Small 이 본 프레임 수(전환 프레임 − 시작 + 1)를 구간(`EXTRA_INPUT_LENGTH_BINS`: 1~50, 51~200, 201~500, 501~)으로 나누고
+구간마다 회복률(J&F, J). 오래 쌓인 기억일수록 넘기기가 어려워지는지 본다.
+
+## 결과 분석: 출력 일치도
+
+| 열 | 무엇 |
+|---|---|
+| extra_agreement | 전환 뒤 프레임마다 방법 마스크와 Full Replay 마스크의 IoU → 평균 |
+
+drift 는 정답과 비교하고, 이것은 Full Replay 와 비교한다 → 정답이 필요 없어 **MOSEv2 valid 에서도** 계산한다.
+Full Replay 마스크는 평가 중 압축해(`np.packbits`) 들고 있다.
+
+## 진단 비교군
+
+실제로 쓰지는 않을 방법이지만, 다른 비교군 점수가 왜 그렇게 나왔는지 알아보는 용도. 주 표와 같은 열.
+
+| 이름 | 무엇 | 비교 상대 |
+|---|---|---|
+| reset | Base+ 에게 아무것도 넘기지 않음 → 전환 뒤 전부 빈 마스크 | 바닥 점수 |
+| recent_k_only | 처음 정답 마스크 없이, Small 마스크 한 장(s−K+1)에서 시작해 전환 직전 최근 K 프레임만 다시 봄 (`EXTRA_RECENT_K`) | Original+Replay-K (처음 정답을 줌) — 같은 표에 나란히 |
