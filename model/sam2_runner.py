@@ -6,6 +6,7 @@
     session = runner.start(video)             # 영상 하나 열기 (세션 하나 = 객체 하나)
     session.add_prompt(frame, mask)           # "이 프레임에서 이 모양을 따라가라"
     session.load_memory(entries)              # 다른 세션에서 꺼낸 기억을 넣기
+    session.encode_prompts()                  # 넣은 프롬프트를 기억 칸으로 바꿔 두기 (track 전 준비)
     for out in session.track(first, last):    # first ~ last 프레임 추적
         out.frame, out.mask, out.visible
     entries = session.export_memory()         # 지금 들고 있는 기억 꺼내기
@@ -135,6 +136,15 @@ class Session:
         with self._context():
             self.predictor.add_new_mask(self.state, frame_idx=frame, obj_id=OBJ_ID,
                                         mask=torch.as_tensor(mask, dtype=torch.bool))
+
+    def encode_prompts(self) -> None:
+        """넣은 프롬프트 마스크를 기억 칸으로 바꿔 둔다 (SAM2 propagate_in_video_preflight).
+
+        SAM2 는 이 일을 track 의 첫 프레임 때 한다. 전환 지연(준비 시간)에 넣으려고 미리 부른다.
+        track 이 다시 불러도 할 일이 없어서 결과는 같다.
+        """
+        with self._context():
+            self.predictor.propagate_in_video_preflight(self.state)
 
     def track(self, first: int, last: int):
         """first ~ last 프레임을 차례로 추적하며 한 장씩 돌려준다."""

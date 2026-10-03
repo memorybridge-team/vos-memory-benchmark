@@ -133,6 +133,8 @@ def _run_base(base, video, obj, prepare, keep_after, keeper, folder, collect=Non
     with cost.peak_vram() as vram:
         t0 = cost.now()
         track_from = prepare(session)
+        if track_from is not None:
+            session.encode_prompts()    # SAM2 는 원래 track 첫 프레임 때 함 → 준비 시간에 넣는다
         run.setup_seconds = cost.now() - t0
         if track_from is None:      # 아무것도 못 받음 → 전환 뒤 전부 빈 마스크
             empty = np.zeros(video.size, dtype=bool)

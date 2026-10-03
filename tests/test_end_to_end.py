@@ -70,10 +70,10 @@ def check_rows(dataset: str, part=None) -> None:
         assert r["jf"] is not None and r["n_frames"] > 0, r
         assert len(r["extra_drift_jf"]) == len(settings.EXTRA_DRIFT_BINS), r
         assert r["extra_agreement"] is not None, r
-        if r["baseline"] == "reset":
-            assert r["seconds_to_first_frame"] is None, r
+        if r["baseline"] in ("reset", "source_only"):
+            assert r["switch_seconds"] is None, r
         else:
-            assert r["seconds_to_first_frame"] >= 0, r
+            assert r["switch_seconds"] >= 0, r
         if r["role"] == "main":     # [추가] recent_k_only 는 객체가 안 보일 때 시작하면 0점이 맞음
             assert r["jf"] > 0.3, r
     replay = [r for r in rows if r["baseline"] == "full_replay"]
@@ -117,7 +117,7 @@ def check_tables() -> None:
         assert f"| {m.label} |" in main_md, m.label
     for m in EXTRA:
         assert m.label not in main_md and f"| {m.label} |" in extra_md, m.label
-    for column in ("회복률 J&F", "격차 회복률 J", "첫 결과까지(초)", "속도 배수"):
+    for column in ("회복률 J&F", "격차 회복률 J", "전환 지연(초)", "속도 배수"):
         assert column in main_md, column
     assert "## mosev2_valid" in main_md and "## lvos_v2_train (dev)" in main_md
     vost = main_md.split("## vost_val")[1].split("##")[0]

@@ -59,6 +59,9 @@ class FakeSession:
             target = self.cond if e["is_cond"] else self.non_cond
             target[frame] = {k: v for k, v in e.items() if k != "is_cond"}
 
+    def encode_prompts(self):
+        pass
+
     def export_memory(self):
         out = {}
         for store, is_cond in ((self.cond, True), (self.non_cond, False)):

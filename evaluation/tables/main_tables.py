@@ -4,7 +4,7 @@
   J, J&F                     전환 뒤, 객체가 보이는 프레임만 (MOSEv2 valid 는 서버가 준 영상 전체 점수)
   회복률 J, 회복률 J&F         영상마다 방법 ÷ Full Replay × 100 → 평균
   격차 회복률 J, J&F           (방법 − Source-only) ÷ (Full Replay − Source-only) × 100, 영상 평균 점수로 한 번
-  첫 결과까지(초), 속도 배수   전환 순간부터 전환 뒤 첫 프레임 결과까지, Full Replay 대비 몇 배 빠른가
+  전환 지연(초), 속도 배수     Small 이 s 를 끝낸 직후부터 Base+ 가 s+1 처리 준비를 마칠 때까지, Full Replay 대비 몇 배 빠른가
 점수는 100점 만점. 데이터셋마다 주 지표(VOST·M3VOS 는 J, 나머지는 J&F)를 제목 아래에 적는다.
 """
 
@@ -15,7 +15,7 @@ from evaluation.scoring.main_metrics import gap_retention, retention, speedup
 from evaluation.tables.common import fmt, main_metric, markdown, mean_over_videos, rows_of, video_count
 
 HEADER = ["비교군", "J", "J&F", "회복률 J", "회복률 J&F", "격차 회복률 J", "격차 회복률 J&F",
-          "첫 결과까지(초)", "속도 배수", "영상 수"]
+          "전환 지연(초)", "속도 배수", "영상 수"]
 
 
 def baseline_table(rows: list[dict], baselines) -> str:
@@ -33,7 +33,7 @@ def baseline_table(rows: list[dict], baselines) -> str:
             fmt(retention(mine, replay, "jf")),
             fmt(gap_retention(mine, source, replay, "j")),
             fmt(gap_retention(mine, source, replay, "jf")),
-            fmt(mean_over_videos(mine, "seconds_to_first_frame"), 3),
+            fmt(mean_over_videos(mine, "switch_seconds"), 3),
             fmt(speedup(mine, replay)),
             video_count(mine),
         ])

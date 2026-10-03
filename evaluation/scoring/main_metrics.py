@@ -6,7 +6,7 @@
 
 표 (tables/main_tables.py 가 씀)
   회복률(%)      영상마다 방법 ÷ Full Replay × 100 → 영상들의 평균
-  속도 배수      영상마다 Full Replay 첫 결과 시간 ÷ 방법 첫 결과 시간 → 영상들의 평균
+  속도 배수      영상마다 Full Replay 전환 지연 ÷ 방법 전환 지연 → 영상들의 평균
   격차 회복률(%) (방법 − Source-only) ÷ (Full Replay − Source-only) × 100
                  영상 평균 점수로 한 번만 나눈다 (C2C 논문의 PGR 과 같은 방식).
                  영상마다 나누면 Source-only 와 Full Replay 가 거의 같은 영상에서 분모가 0 에 가까워 값이 튄다.
@@ -53,8 +53,8 @@ def retention(rows: list[dict], replay_rows: list[dict], key: str):
 
 
 def speedup(rows: list[dict], replay_rows: list[dict]):
-    """속도 배수 — Full Replay 보다 첫 결과가 몇 배 빨리 나오는가."""
-    return mean(ratio_by_video(replay_rows, rows, "seconds_to_first_frame").values())
+    """속도 배수 — Full Replay 보다 전환이 몇 배 빨리 끝나는가."""
+    return mean(ratio_by_video(replay_rows, rows, "switch_seconds").values())
 
 
 def gap_retention(rows: list[dict], source_rows: list[dict], replay_rows: list[dict], key: str):
