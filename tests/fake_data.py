@@ -39,15 +39,12 @@ def draw(t: int, ignore: bool):
     return img, labels
 
 
-def make_video(frames_root: Path, masks_root: Path, name: str,
-               first_frame_only=False, ignore=False, shift=0) -> None:
+def make_video(frames_root: Path, masks_root: Path, name: str, ignore=False, shift=0) -> None:
     (frames_root / name).mkdir(parents=True, exist_ok=True)
     (masks_root / name).mkdir(parents=True, exist_ok=True)
     for t in range(N):
         img, labels = draw(t + shift, ignore)
         Image.fromarray(img).save(frames_root / name / f"{t:05d}.png")
-        if first_frame_only and t > 0:
-            continue
         png = Image.fromarray(labels, mode="P")
         png.putpalette(PALETTE)
         png.save(masks_root / name / f"{t:05d}.png")
@@ -55,18 +52,12 @@ def make_video(frames_root: Path, masks_root: Path, name: str,
 
 def make_all(data_root: Path, folders: dict) -> None:
     """settings.DATA_FOLDERS 와 data/*.py 가 기대하는 폴더 모양으로 만든다."""
-    def split_layout(key, split, names, **kw):
-        root = data_root / folders[key] / split
-        for i, name in enumerate(names):
-            make_video(root / "JPEGImages", root / "Annotations", name, shift=i % 3, **kw)
-
-    split_layout("mosev2", "train", [f"mtrain_{i:02d}" for i in range(6)])
-    split_layout("mosev2", "valid", ["mval_00", "mval_01"], first_frame_only=True)
-    split_layout("lvos_v2", "train", [f"ltrain_{i:02d}" for i in range(10)])
-    split_layout("lvos_v2", "val", ["lval_00", "lval_01", "lval_02"])      # LVOS v2 는 폴더 이름이 val
+    lvos = data_root / folders["lvos_v2"] / "val"                           # LVOS v2 는 폴더 이름이 val
+    for i, name in enumerate(["lval_00", "lval_01", "lval_02"]):
+        make_video(lvos / "JPEGImages", lvos / "Annotations", name, shift=i % 3)
     # LVOS 공식 속성 파일 (README 모양)
     attributes = {"lval_00": ["OCC", "DEF"], "lval_01": ["FM"], "lval_02": ["OCC"]}
-    (data_root / folders["lvos_v2"] / "val" / "val_meta_attribute.json").write_text(json.dumps(
+    (lvos / "val_meta_attribute.json").write_text(json.dumps(
         {"videos": {v: {"attributes": a, "objects": {}} for v, a in attributes.items()}}))
 
     vost = data_root / folders["vost"]                                     # 공식 이름: 번호_동작_물체
@@ -78,7 +69,7 @@ def make_all(data_root: Path, folders: dict) -> None:
 
     m3vos_root = data_root / folders["m3vos"]                              # Hugging Face 모양
     m3vos = m3vos_root / "data"
-    make_video(m3vos / "JPEGImages", m3vos / "Annotations", "0001_melt_ice_1")
+    make_video(m3vos / "JPEGImages", m3vos / "Annotations", "0001_melt_ice_1", ignore=True)   # 255 = void
     (m3vos / "ImageSets").mkdir(parents=True, exist_ok=True)
     (m3vos / "ImageSets" / "val.txt").write_text("0001_melt_ice_1\n")
     (m3vos_root / "meta").mkdir(parents=True, exist_ok=True)

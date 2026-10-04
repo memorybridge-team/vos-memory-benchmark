@@ -32,8 +32,3 @@ def mean_over_videos(rows: list[dict], key: str, scale=1.0):
 
 def main_metric(dataset: str) -> str:
     return "J" if dataset in settings.J_MAIN_DATASETS else "J&F"
-
-
-def has_full_gt(rows: list[dict]) -> bool:
-    """정답이 모든 프레임에 있어 여기서 채점한 데이터셋인가 (MOSEv2 valid 는 아님)."""
-    return any(r.get("n_frames") for r in rows)

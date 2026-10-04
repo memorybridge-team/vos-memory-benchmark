@@ -6,7 +6,7 @@ s+1 부터 이어간다. 다시 보는 동안 낸 마스크는 버린다 (그 �
 
 
 def make_replay(k: int):
-    def original_replay(session, pkg, stats):
+    def original_replay(session, pkg):
         session.add_prompt(pkg.prompt_frame, pkg.prompt_mask)
         return max(pkg.prompt_frame + 1, pkg.switch_frame - k + 1)
     original_replay.__name__ = f"original_replay_{k}"

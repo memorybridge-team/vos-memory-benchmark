@@ -1,7 +1,7 @@
 """영상 하나 = 프레임 목록 + 정답 PNG + 무시값.
 
 모든 데이터셋은 결국 아래 Video 하나로 바뀐다. 데이터셋마다 다른 점
-(폴더 모양, 무시 영역 값, 정답이 모든 프레임에 있는지)은 data/<데이터셋>.py 가 정해서 넘긴다.
+(폴더 모양, 무시 영역 값)은 data/<데이터셋>.py 가 정해서 넘긴다. 모두 모든 프레임에 정답이 있다.
 """
 
 from __future__ import annotations
@@ -26,14 +26,10 @@ class Video:
     frame_paths: list[Path]       # 프레임 번호 순서대로
     mask_paths: dict[int, Path]   # 프레임 번호 → 정답 PNG (정답이 있는 프레임만)
     ignore_value: int | None      # 정답 PNG에서 "채점하지 않는 영역"의 값 (없으면 None)
-    has_full_gt: bool             # False = 첫 프레임에만 정답 (MOSEv2 valid) → 여기서 채점 못 함
 
     @property
     def num_frames(self) -> int:
         return len(self.frame_paths)
-
-    def frame_name(self, frame: int) -> str:
-        return self.frame_paths[frame].stem
 
     @cached_property
     def size(self) -> tuple[int, int]:
@@ -59,14 +55,6 @@ class Video:
     def object_mask(self, frame: int, obj_id: int) -> np.ndarray:
         labels, _ = self.read_labels(frame)
         return labels == obj_id
-
-    def palette(self):
-        """정답 PNG의 색 팔레트 (서버 제출 PNG에 그대로 씀)."""
-        for frame in sorted(self.mask_paths):
-            with Image.open(self.mask_paths[frame]) as im:
-                if im.mode == "P":
-                    return im.getpalette()
-        return None
 
 
 def read_label_png(path: Path) -> np.ndarray:
@@ -105,8 +93,7 @@ def _natural_key(path: Path):
 
 def videos_from_folders(dataset: str, frames_root: Path, masks_root: Path, *,
                         names: list[str] | None = None,
-                        ignore_value: int | None = None,
-                        has_full_gt: bool = True) -> list[Video]:
+                        ignore_value: int | None = None) -> list[Video]:
     """frames_root/<영상>/<프레임>.jpg 와 masks_root/<영상>/<프레임>.png 구조를 읽는다.
 
     프레임과 정답은 파일 이름(확장자 뺀 것)이 같으면 짝이 된다.
@@ -125,7 +112,7 @@ def videos_from_folders(dataset: str, frames_root: Path, masks_root: Path, *,
             for p in mask_dir.glob("*.png"):
                 if p.stem in index:
                     masks[index[p.stem]] = p
-        videos.append(Video(dataset, name, frames, masks, ignore_value, has_full_gt))
+        videos.append(Video(dataset, name, frames, masks, ignore_value))
     return videos
 
 
@@ -139,6 +126,6 @@ def print_first_video(videos: list[Video]) -> None:
     ids = object_ids(v.read_labels(first_gt)[0]) if first_gt is not None else []
     print(f"[{v.dataset}] 영상 {len(videos)}개 중 첫 영상 '{v.name}'")
     print(f"  프레임 수        : {v.num_frames}  (크기 {v.size[0]}x{v.size[1]})")
-    print(f"  정답 있는 프레임 : {len(v.mask_paths)}  (모든 프레임 정답: {v.has_full_gt})")
+    print(f"  정답 있는 프레임 : {len(v.mask_paths)}")
     print(f"  첫 정답 프레임   : {first_gt}, 그 프레임 객체 {len(ids)}개 {ids}")
     print(f"  무시 영역 값     : {v.ignore_value}")

@@ -20,7 +20,6 @@ class FrameScore:
     j: float
     f: float
     gt_visible: bool         # 이 프레임 정답에 객체가 보이는가
-    other_iou: float = 0.0   # [추가] 다른 객체 정답과 가장 많이 겹친 정도 (ID 뒤바뀜용)
 
     @property
     def jf(self) -> float:

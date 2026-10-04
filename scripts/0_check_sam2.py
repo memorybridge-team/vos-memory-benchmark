@@ -1,7 +1,7 @@
 """[0] 설치된 SAM2 확인: Small/Base+ 기억 모양, 꺼냈다 넣어도 결과가 같은지.
 
     python scripts/0_check_sam2.py
-    python scripts/0_check_sam2.py --dataset lvos_v2_train --video <영상 이름>
+    python scripts/0_check_sam2.py --dataset vost_val --video <영상 이름>
 """
 
 import argparse
@@ -22,7 +22,7 @@ def ok(flag: bool) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default="lvos_v2_train")
+    parser.add_argument("--dataset", default="lvos_v2_valid")
     parser.add_argument("--video", default=None, help="비우면 첫 영상")
     parser.add_argument("--cut", type=int, default=10, help="프롬프트 뒤 몇 프레임에서 끊을지")
     parser.add_argument("--after", type=int, default=15, help="끊은 뒤 몇 프레임을 비교할지")

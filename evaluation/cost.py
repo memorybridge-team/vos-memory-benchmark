@@ -1,21 +1,22 @@
-"""비용: 시간 · VRAM.
+"""비용: 시간 · GPU 메모리. Base+ 실행 한 번(evaluate_video.Run)으로 결과 줄의 비용 열을 만든다.
 
 결과 줄에 남기는 비용 열:
-  switch_seconds           [주] 전환 지연: Small이 s 까지 처리한 직후부터 Base+ 가 s+1 을 처리할 준비가 끝날 때까지
-                           = 옮기기 + Base+ 형태로 바꿔 넣기 (setup_seconds) + 다시 보기 (s 이하 프레임 시간).
-                           Small 메모리 꺼내기(export)와 s+1 처리는 뺀다 (SCD 식 T_transfer 와 같은 범위).
-  seconds_per_frame_after  [추가] 전환 뒤 프레임당 평균 시간
-  peak_vram_mb             [추가] 그 실행 동안 GPU 메모리 최고치 (켜 둔 두 모델 무게 포함)
-전환이 없거나 (Source-only) 전환 뒤 결과를 하나도 내지 않으면 (reset) switch_seconds 는 None.
-reset 은 seconds_per_frame_after 도 None.
+  seconds              [주] 시간: Base+ 가 한 일 전부 = 준비(프롬프트·기억 넣기) + 추적한 모든 프레임
+                       Full Replay = Base+ 로 처음 ~ 끝 전체 / 다른 비교군 = 넘기기(Replay-K 는 다시 보기 포함) + s+1 ~ 끝.
+                       Small 에서 기억 꺼내기(export)는 넣지 않는다.
+  extra_switch_gpu_mb  [추가] 전환 GPU 메모리(MB): 전환 구간 GPU 메모리 최고치 − 전환 직전 사용량.
+                       전환 구간 = Small 이 s 를 끝낸 뒤 ~ Base+ 가 s+1 처리 준비를 마칠 때 (바꿔 넣기 + 다시 보기).
+                       전환 직전 = Base+ 세션을 연 직후.
+Source-only(전환 없음)와 reset(전환 뒤 아무것도 추적 안 함)은 둘 다 None. GPU 가 없으면 GPU 열은 None.
 """
 
 from __future__ import annotations
 
 import time
-from contextlib import contextmanager
 
 import torch
+
+NO_COST = {"seconds": None, "extra_switch_gpu_mb": None}
 
 
 def now() -> float:
@@ -40,34 +41,27 @@ def timed(frames):
         yield item, now() - t0
 
 
-class PeakVram:
-    mb: float | None = None
+def gpu_mb() -> float | None:
+    """지금 GPU 에 올라가 있는 양 (MB)."""
+    return torch.cuda.memory_allocated() / 2 ** 20 if torch.cuda.is_available() else None
 
 
-@contextmanager
-def peak_vram():
-    box = PeakVram()
+def reset_gpu_peak() -> None:
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
-    try:
-        yield box
-    finally:
-        if torch.cuda.is_available():
-            box.mb = torch.cuda.max_memory_allocated() / 2 ** 20
 
 
-def cost_columns(times: dict[int, float], setup_seconds: float, switch_frame: int,
-                 peak_vram_mb, keeps_running: bool = False) -> dict:
-    """times = {프레임: 그 프레임에 걸린 초}. keeps_running = 전환 없이 계속 도는 경우 (Source-only)."""
-    after = [t for f, t in times.items() if f > switch_frame]
-    if not after:
-        switch = per_frame = None
-    else:
-        replay = sum(t for f, t in times.items() if f <= switch_frame)
-        switch = None if keeps_running else setup_seconds + replay
-        per_frame = sum(after) / len(after)
+def gpu_peak_mb() -> float | None:
+    """마지막 reset_gpu_peak() 뒤 GPU 사용량 최고치 (MB)."""
+    return torch.cuda.max_memory_allocated() / 2 ** 20 if torch.cuda.is_available() else None
+
+
+def cost_columns(run, switch_frame: int) -> dict:
+    """run = Base+ 실행 한 번. run.gpu_peaks[s] = 프레임 s 까지(준비 포함)의 최고치."""
+    if not run.times:
+        return dict(NO_COST)
+    peak = run.gpu_peaks[switch_frame]
     return {
-        "switch_seconds": switch,
-        "seconds_per_frame_after": per_frame,
-        "peak_vram_mb": peak_vram_mb,
+        "seconds": run.setup_seconds + sum(run.times.values()),
+        "extra_switch_gpu_mb": None if peak is None else peak - run.gpu_before_mb,
     }

@@ -1,11 +1,10 @@
 """[1] 데이터셋마다 영상·객체·전환 시점 목록을 만들어 파일로 고정한다.
 
     python scripts/1_make_video_list.py                          # 전부
-    python scripts/1_make_video_list.py --datasets lvos_v2_train vost_val
+    python scripts/1_make_video_list.py --datasets lvos_v2_valid vost_val
 
 결과: outputs/lists/<데이터셋>.json
   객체 시작 = 정답에서 처음 보인 프레임, 끝 = 영상 마지막 프레임.
-  train 데이터셋은 영상마다 fit / dev 표시.
   [추가] 공식 라벨이 있는 데이터셋은 객체마다 "extra_labels" (evaluation/scoring/extra_groups.py).
 """
 
@@ -19,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import settings  # noqa: E402
 from evaluation.data import DATASETS, labels_of, load_dataset, load_labels, video_list_path  # noqa: E402
 from evaluation.data.common import object_ids  # noqa: E402
-from evaluation.data.split import part_of  # noqa: E402
 from evaluation.switches import switch_points  # noqa: E402
 
 
@@ -48,16 +46,10 @@ def make_list(dataset: str) -> dict:
             objects.append({"object": obj_id, "start": start, "end": end,
                             "switches": switch_points(start, end),
                             "extra_labels": labels_of(labels, video.name, obj_id)})
-        entries.append({
-            "video": video.name,
-            "num_frames": video.num_frames,
-            "part": part_of(video.name) if dataset in settings.TRAIN_DATASETS else None,
-            "objects": objects,
-        })
+        entries.append({"video": video.name, "num_frames": video.num_frames, "objects": objects})
         if i % 50 == 0 or i == len(videos):
             print(f"  {dataset}: {i}/{len(videos)}")
-    return {"dataset": dataset, "has_full_gt": bool(videos and videos[0].has_full_gt),
-            "skipped_short_objects": skipped, "videos": entries}
+    return {"dataset": dataset, "skipped_short_objects": skipped, "videos": entries}
 
 
 def main():

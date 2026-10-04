@@ -9,11 +9,11 @@ recent_k_only  : 처음 정답 없이 Small 마스크 한 장(s-K+1)에서 시�
 import settings
 
 
-def reset(session, pkg, stats):
+def reset(session, pkg):
     return None
 
 
-def recent_k_only(session, pkg, stats):
+def recent_k_only(session, pkg):
     s = pkg.switch_frame
     first = max(pkg.prompt_frame, s - settings.EXTRA_RECENT_K + 1)
     session.add_prompt(first, pkg.recent_masks[first])

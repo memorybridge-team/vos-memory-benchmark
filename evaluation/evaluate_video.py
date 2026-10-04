@@ -6,10 +6,8 @@
        = Source-only 결과이자, 모든 비교군이 같이 쓰는 전환 전 구간.
        전환 프레임마다 기억 상자(HandoffPackage)를 챙겨 둔다.
   ③ 전환 시점 × 나머지 비교군: 새 Base+ 세션에 비교군마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
-  ④ 시간·VRAM 기록.
-  ⑤ 채점: 정답이 모든 프레임에 있으면 전환 뒤 J·J&F (주) + [추가] 지표.
-          MOSEv2 valid 는 채점 대신 주 비교군의 마스크 PNG 저장 (점수는 서버에서).
-          [추가] 출력 일치도는 정답이 필요 없어 둘 다 계산.
+  ④ Base+ 실행마다 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환이 없어 재지 않는다.
+  ⑤ 채점: 전환 뒤 J·J&F (주) + [추가] 실패 비율·출력 일치도.
   ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
 """
 
@@ -28,12 +26,13 @@ from evaluation.scoring import extra_metrics, jf, main_metrics
 
 @dataclass
 class Run:
-    """추적 한 번의 결과: 프레임별 점수·출력 일치도·시간, 비용."""
+    """추적 한 번의 결과: 프레임별 점수·출력 일치도·시간, GPU 메모리."""
     scores: dict = field(default_factory=dict)     # 프레임 → FrameScore (정답 있는 프레임만)
     agreement: dict = field(default_factory=dict)  # 프레임 → Full Replay 마스크와의 IoU
-    times: dict = field(default_factory=dict)      # 프레임 → 초
+    times: dict = field(default_factory=dict)      # 프레임 → 초 (Base+ 만)
     setup_seconds: float = 0.0
-    peak_vram_mb: float | None = None
+    gpu_before_mb: float | None = None             # Base+ 세션을 연 직후 GPU 사용량
+    gpu_peaks: dict = field(default_factory=dict)  # 프레임 → 그 프레임까지(준비 포함) GPU 최고치
 
 
 class PackedMasks:
@@ -67,27 +66,19 @@ class FrameScorer:
             j=jf.j_score(pred, own, ignore),
             f=jf.f_score(pred, own, ignore),
             gt_visible=bool(own.any()),
-            other_iou=extra_metrics.other_object_iou(pred, labels, ignore, self.obj_id),
         )
 
 
 @dataclass
 class Keeper:
-    """한 프레임 결과를 채점(정답 있음) · 제출용 저장(MOSEv2 valid) · Full Replay 와 비교한다."""
-    video: object
-    obj_id: int
-    scorer: FrameScorer | None
-    saver: object | None
+    """한 프레임 결과를 채점하고 Full Replay 와 비교한다."""
+    scorer: FrameScorer
     replay: PackedMasks | None = None       # ① Full Replay 가 끝난 뒤 채워짐
 
-    def keep(self, run: Run, frame: int, mask: np.ndarray, folder: str | None) -> None:
-        """folder = 제출용 마스크를 저장할 폴더 이름 (None 이면 저장 안 함)."""
-        if self.scorer is not None:
-            score = self.scorer.score(frame, mask)
-            if score is not None:
-                run.scores[frame] = score
-        if self.saver is not None and folder is not None:
-            self.saver.save(folder, self.video.name, self.obj_id, self.video.frame_name(frame), mask)
+    def keep(self, run: Run, frame: int, mask: np.ndarray) -> None:
+        score = self.scorer.score(frame, mask)
+        if score is not None:
+            run.scores[frame] = score
         if self.replay is not None and frame in self.replay.packed:
             run.agreement[frame] = extra_metrics.mask_iou(mask, self.replay.get(frame))
 
@@ -100,84 +91,81 @@ def _run_small(small, video, obj, prompt, keeper):
     run, packages, recent, last_visible = Run(), {}, {}, None
 
     session = small.start(video)
-    with cost.peak_vram() as vram:
-        t0 = cost.now()
-        session.add_prompt(start, prompt)
-        run.setup_seconds = cost.now() - t0
-        for out, seconds in cost.timed(session.track(start, end)):
-            f = out.frame
-            run.times[f] = seconds
-            keeper.keep(run, f, out.mask, "small")
-            recent[f] = out.mask
-            recent.pop(f - keep_recent, None)
-            if out.visible and out.mask.any():
-                last_visible = (f, out.mask)
-            if f in switch_frames:
-                packages[f] = HandoffPackage(
-                    switch_frame=f, prompt_frame=start, prompt_mask=prompt,
-                    small_memory=session.export_memory(),
-                    last_visible=last_visible, recent_masks=dict(recent))
-    run.peak_vram_mb = vram.mb
+    session.add_prompt(start, prompt)
+    for out in session.track(start, end):
+        f = out.frame
+        keeper.keep(run, f, out.mask)
+        recent[f] = out.mask
+        recent.pop(f - keep_recent, None)
+        if out.visible and out.mask.any():
+            last_visible = (f, out.mask)
+        if f in switch_frames:
+            packages[f] = HandoffPackage(
+                switch_frame=f, prompt_frame=start, prompt_mask=prompt,
+                small_memory=session.export_memory(),
+                last_visible=last_visible, recent_masks=dict(recent))
     session.close()
     return run, packages
 
 
-def _run_base(base, video, obj, prepare, keep_after, keeper, folder, collect=None):
+def _run_base(base, video, obj, prepare, keep_after, keeper, collect=None):
     """새 Base+ 세션을 prepare 로 준비하고 끝까지 추적. keep_after 보다 뒤 프레임만 결과로 남긴다.
 
+    GPU: 세션을 연 직후 사용량을 적고, 준비가 끝난 때(track_from − 1 칸)와 프레임마다
+    그때까지의 최고치를 적는다 → gpu_peaks[s] = Base+ 가 s+1 처리 준비를 마칠 때까지의 최고치.
     collect 가 있으면 남긴 마스크를 거기에 압축해 모은다 (① Full Replay 만).
     """
     end = obj["end"]
     run = Run()
     session = base.start(video)
-    with cost.peak_vram() as vram:
-        t0 = cost.now()
-        track_from = prepare(session)
-        if track_from is not None:
-            session.encode_prompts()    # SAM2 는 원래 track 첫 프레임 때 함 → 준비 시간에 넣는다
-        run.setup_seconds = cost.now() - t0
-        if track_from is None:      # 아무것도 못 받음 → 전환 뒤 전부 빈 마스크
-            empty = np.zeros(video.size, dtype=bool)
-            for f in range(keep_after + 1, end + 1):
-                keeper.keep(run, f, empty, folder)
-        else:
-            for out, seconds in cost.timed(session.track(track_from, end)):
-                run.times[out.frame] = seconds
-                if out.frame > keep_after:
-                    keeper.keep(run, out.frame, out.mask, folder)
-                    if collect is not None:
-                        collect.add(out.frame, out.mask)
-    run.peak_vram_mb = vram.mb
+    run.gpu_before_mb = cost.gpu_mb()
+    cost.reset_gpu_peak()
+    t0 = cost.now()
+    track_from = prepare(session)
+    if track_from is not None:
+        session.encode_prompts()    # SAM2 는 원래 track 첫 프레임 때 함 → 준비 시간에 넣는다
+    run.setup_seconds = cost.now() - t0
+    if track_from is None:      # 아무것도 못 받음 → 전환 뒤 전부 빈 마스크
+        empty = np.zeros(video.size, dtype=bool)
+        for f in range(keep_after + 1, end + 1):
+            keeper.keep(run, f, empty)
+    else:
+        run.gpu_peaks[track_from - 1] = cost.gpu_peak_mb()
+        for out, seconds in cost.timed(session.track(track_from, end)):
+            run.times[out.frame] = seconds
+            run.gpu_peaks[out.frame] = cost.gpu_peak_mb()
+            if out.frame > keep_after:
+                keeper.keep(run, out.frame, out.mask)
+                if collect is not None:
+                    collect.add(out.frame, out.mask)
     session.close()
     return run
 
 
-def _row(video, obj, sw, baseline, part, run, cost_info) -> dict:
+def _row(video, obj, sw, baseline, run, cost_info) -> dict:
     s = sw["frame"]
-    row = {"dataset": video.dataset, "part": part, "video": video.name, "object": obj["object"],
+    row = {"dataset": video.dataset, "video": video.name, "object": obj["object"],
            "switch_name": sw["name"], "switch_frame": s,
            "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role}
-    if video.has_full_gt:
-        # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
-        visible = {f: sc for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible}
-        row.update(main_metrics.score_columns(list(visible.values())))
-        row.update(extra_metrics.compute(visible, s))
+    # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
+    visible = [sc for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible]
+    row.update(main_metrics.score_columns(visible))
+    row["extra_failure_rate"] = extra_metrics.failure_rate(visible)
     row["extra_agreement"] = extra_metrics.agreement(run.agreement, s)
     row.update(cost_info)
     return row
 
 
-def evaluate_object(video, obj, small, base, stats, part=None, saver=None) -> list[dict]:
+def evaluate_object(video, obj, small, base) -> list[dict]:
     obj_id, start = obj["object"], obj["start"]
     prompt = video.object_mask(start, obj_id)
-    scorer = FrameScorer(video, obj_id) if video.has_full_gt else None
-    keeper = Keeper(video, obj_id, scorer, saver)
+    keeper = Keeper(FrameScorer(video, obj_id))
 
     # ① Full Replay: Base+ 처음 ~ 끝, 한 번. 마스크는 출력 일치도 기준으로 들고 있는다.
     replay_masks = PackedMasks(video.size)
     replay_run = _run_base(base, video, obj,
                            lambda session: no_handoff.full_replay(session, start, prompt),
-                           keep_after=start, keeper=keeper, folder="full_replay", collect=replay_masks)
+                           keep_after=start, keeper=keeper, collect=replay_masks)
     keeper.replay = replay_masks
     replay_run.agreement = dict.fromkeys(replay_masks.packed, 1.0)   # 자기 자신과는 항상 같음
 
@@ -192,17 +180,12 @@ def evaluate_object(video, obj, small, base, stats, part=None, saver=None) -> li
         for baseline in BASELINES:
             if baseline.name == "source_only":
                 run = small_run
-                cost_info = cost.cost_columns(run.times, run.setup_seconds, s, run.peak_vram_mb,
-                                              keeps_running=True)
             elif baseline.name == "full_replay":
                 run = replay_run
-                cost_info = cost.cost_columns(run.times, run.setup_seconds, s, run.peak_vram_mb)
             else:
-                # MOSEv2 제출 파일은 주 비교군만 만든다 → [추가] 비교군은 마스크를 저장하지 않음.
-                folder = f"{baseline.name}__{sw['name']}" if baseline.role == "main" else None
                 run = _run_base(base, video, obj,
-                                lambda session: baseline.prepare(session, pkg, stats),
-                                keep_after=s, keeper=keeper, folder=folder)
-                cost_info = cost.cost_columns(run.times, run.setup_seconds, s, run.peak_vram_mb)
-            rows.append(_row(video, obj, sw, baseline, part, run, cost_info))
+                                lambda session: baseline.prepare(session, pkg),
+                                keep_after=s, keeper=keeper)
+            cost_info = cost.NO_COST if run is small_run else cost.cost_columns(run, s)
+            rows.append(_row(video, obj, sw, baseline, run, cost_info))
     return rows

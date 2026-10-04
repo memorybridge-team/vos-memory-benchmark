@@ -98,15 +98,27 @@
   "hotPaths": [
     {
       "path": "docs/PROTOCOL.md",
-      "accessCount": 2,
-      "lastAccessed": 1790960129795,
+      "accessCount": 7,
+      "lastAccessed": 1791151130611,
       "type": "file"
     },
     {
       "path": "docs/EXTRAS.md",
-      "accessCount": 1,
-      "lastAccessed": 1790960131016,
+      "accessCount": 3,
+      "lastAccessed": 1791151158692,
       "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1791151164452,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1791151185047,
+      "type": "directory"
     }
   ],
   "userDirectives": []

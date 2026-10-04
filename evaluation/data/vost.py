@@ -17,7 +17,7 @@ def load(split: str = "val"):
     root = dataset_root("vost")
     names = read_names(root / "ImageSets" / f"{split}.txt")
     return videos_from_folders(f"vost_{split}", root / "JPEGImages", root / "Annotations",
-                               names=names, ignore_value=IGNORE_VALUE, has_full_gt=True)
+                               names=names, ignore_value=IGNORE_VALUE)
 
 
 def load_labels(split: str = "val") -> dict:

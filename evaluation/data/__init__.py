@@ -13,11 +13,8 @@ from pathlib import Path
 
 import settings
 
-# 데이터셋 이름 → (data/ 안의 파일, 나누기)
+# 데이터셋 이름 → (data/ 안의 파일, 나누기). 검증 = LVOS v2 valid, 평가 = VOST val + M3VOS + PUMaVOS
 DATASETS = {
-    "mosev2_train": ("mosev2", "train"),
-    "lvos_v2_train": ("lvos_v2", "train"),
-    "mosev2_valid": ("mosev2", "valid"),
     "lvos_v2_valid": ("lvos_v2", "valid"),
     "vost_val": ("vost", "val"),
     "m3vos": ("m3vos", None),

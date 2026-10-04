@@ -1,11 +1,12 @@
-"""M3VOS (M3-VOS, CVPR 2025). 무시 영역 없음.
+"""M3VOS (M3-VOS, CVPR 2025). 정답 PNG의 255 = 무시 영역 (객체가 아님, 채점에서 뺌).
 
 확인한 것 (huggingface.co/datasets/Lijiaxin0111/M3_VOS):
-  - 정답 PNG 는 팔레트 모드, 값은 0(배경)과 객체 번호(1, 2, 3 ...)뿐. 영상 12개 × 3장을 열어 봤을 때 255 없음
-  - 프레임 이름 7자리 (0000000.jpg), 평가 목록 ImageSets/val.txt
-폴더 모양은 받은 곳에 따라 두 가지 — 둘 다 읽는다:
-    Hugging Face    data/JPEGImages/<영상>/   data/Annotations/<영상>/   data/ImageSets/val.txt
-    Google Drive    JPEGImages/<영상>/        Annotations/<영상>/        ImageSets/val.txt
+  - 정답 PNG 는 팔레트 모드, 값은 0(배경)과 객체 번호(1, 2, 3 ...). 영상 12개 × 3장을 열어 봤을 때 255 없음
+  - 팀 manifest·공식 reader 는 255 를 void 로 보고 객체에서 뺀다 → 우리도 무시 영역으로 둔다 (없으면 결과 그대로)
+  - 프레임 이름 7자리 (0000000.jpg), 평가 목록 data/ImageSets/val.txt
+
+폴더 모양 (DATA_ROOT/<DATA_FOLDERS["m3vos"]>, 서버의 Hugging Face 받은 모양):
+    data/JPEGImages/<영상>/   data/Annotations/<영상>/   data/ImageSets/val.txt   meta/
 
 확인: python -m evaluation.data.m3vos
 """
@@ -14,17 +15,14 @@ import json
 
 from evaluation.data.common import dataset_root, print_first_video, read_names, videos_from_folders
 
-IGNORE_VALUE = None
+IGNORE_VALUE = 255
 
 
 def load(split=None):
-    root = dataset_root("m3vos")
-    if (root / "data" / "JPEGImages").is_dir():
-        root = root / "data"
-    list_file = root / "ImageSets" / "val.txt"
-    names = read_names(list_file) if list_file.exists() else None
-    return videos_from_folders("m3vos", root / "JPEGImages", root / "Annotations",
-                               names=names, ignore_value=IGNORE_VALUE, has_full_gt=True)
+    data = dataset_root("m3vos") / "data"
+    return videos_from_folders("m3vos", data / "JPEGImages", data / "Annotations",
+                               names=read_names(data / "ImageSets" / "val.txt"),
+                               ignore_value=IGNORE_VALUE)
 
 
 def load_labels(split=None) -> dict:
@@ -33,8 +31,7 @@ def load_labels(split=None) -> dict:
                                    "after_state": "...", "phase transition": "separate"}}}
     객체 단위 → {영상: {객체 번호: ["상태 변화:separate", "상태:solid→liquid"]}}
     """
-    root = dataset_root("m3vos")
-    path = root / "meta" / "all_phase_transition.json"
+    path = dataset_root("m3vos") / "meta" / "all_phase_transition.json"
     if not path.exists():
         return {}
     labels = {}
