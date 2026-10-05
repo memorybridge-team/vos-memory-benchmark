@@ -27,7 +27,7 @@ def load_rows() -> list[dict]:
     rows = []
     for path in sorted((Path(settings.OUTPUT_ROOT) / "records").glob("*.jsonl")):
         rows += records.read_rows(path)
-    return rows
+    return records.unique_rows(rows)
 
 
 def load_object_labels() -> dict:

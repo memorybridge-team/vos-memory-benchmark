@@ -1,11 +1,12 @@
-"""영상 하나의 객체 하나 × 전환 시점 전부 × 비교군 전부 → 결과 줄 목록.
+"""영상 하나의 객체 하나 × 전환 시점 전부 × 고른 방법 (비교군 · 본 모델) → 결과 줄 목록.
 
   ① Full Replay: Base+ 가 처음 ~ 끝을 한 번 추적한다 (전환 시점과 무관).
-       마스크를 압축해 들고 있는다 → 다른 비교군의 [추가] 출력 일치도 기준.
+       마스크를 압축해 들고 있는다 → 다른 방법의 [추가] 출력 일치도 기준.
   ② Small 이 처음 ~ 끝을 한 번 추적한다.
-       = Source-only 결과이자, 모든 비교군이 같이 쓰는 전환 전 구간.
+       = Source-only 결과이자, 모든 방법이 같이 쓰는 전환 전 구간.
        전환 프레임마다 기억 상자(HandoffPackage)를 챙겨 둔다.
-  ③ 전환 시점 × 나머지 비교군: 새 Base+ 세션에 비교군마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
+  ③ 전환 시점 × 나머지 방법: 새 Base+ 세션에 방법마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
+       ①② 는 고른 방법과 상관없이 늘 돌린다 (③ 이 쓰므로). 줄은 고른 방법 것만 낸다.
   ④ Base+ 실행마다 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환이 없어 재지 않는다.
   ⑤ 채점: 전환 뒤 J·J&F (주) + [추가] 실패 비율·출력 일치도.
   ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
@@ -19,7 +20,7 @@ import numpy as np
 
 import settings
 from evaluation import cost
-from baseline import BASELINES, no_handoff
+from baseline import no_handoff
 from baseline.handoff import HandoffPackage
 from evaluation.scoring import extra_metrics, jf, main_metrics
 
@@ -156,7 +157,8 @@ def _row(video, obj, sw, baseline, run, cost_info) -> dict:
     return row
 
 
-def evaluate_object(video, obj, small, base) -> list[dict]:
+def evaluate_object(video, obj, small, base, methods) -> list[dict]:
+    """methods = 결과 줄을 낼 방법들 (evaluation/methods.py)."""
     obj_id, start = obj["object"], obj["start"]
     prompt = video.object_mask(start, obj_id)
     keeper = Keeper(FrameScorer(video, obj_id))
@@ -172,12 +174,12 @@ def evaluate_object(video, obj, small, base) -> list[dict]:
     # ② Small 처음 ~ 끝
     small_run, packages = _run_small(small, video, obj, prompt, keeper)
 
-    # ③ 전환 시점 × 비교군
+    # ③ 전환 시점 × 방법
     rows = []
     for sw in obj["switches"]:
         s = sw["frame"]
         pkg = packages[s]
-        for baseline in BASELINES:
+        for baseline in methods:
             if baseline.name == "source_only":
                 run = small_run
             elif baseline.name == "full_replay":

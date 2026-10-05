@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import settings
-from baseline import BASELINES, BY_NAME, MAIN
+from baseline import BY_NAME, MAIN
+from evaluation.methods import METHODS
 from evaluation.scoring import extra_groups
 from evaluation.scoring.main_metrics import retention
 from evaluation.tables.common import fmt, markdown, mean_over_videos, rows_of, video_count
 from evaluation.tables.main_tables import baseline_table
+from translator import MODEL
 
 # (열 이름, 결과 줄 열, 곱할 값, 소수 자리)
 COST = [("전환 GPU 메모리(MB)", "extra_switch_gpu_mb", 1, 0)]
@@ -25,14 +27,14 @@ AGREEMENT = [("출력 일치도(%)", "extra_agreement", 100, 1)]
 
 
 def column_table(rows: list[dict], columns) -> str:
-    """비교군마다 열들의 영상 평균."""
+    """방법마다 열들의 영상 평균."""
     lines = []
-    for m in BASELINES:
+    for m in METHODS:
         mine = rows_of(rows, m.name)
         if mine:
             lines.append([m.label] + [fmt(mean_over_videos(mine, key, scale), digits)
                                       for _, key, scale, digits in columns] + [video_count(mine)])
-    return markdown(["비교군"] + [name for name, *_ in columns] + ["영상 수"], lines)
+    return markdown(["방법"] + [name for name, *_ in columns] + ["영상 수"], lines)
 
 
 def diagnostic_baselines() -> list:
@@ -42,16 +44,16 @@ def diagnostic_baselines() -> list:
 
 
 def group_tables(rows: list[dict], groups: list[str], groups_of_row) -> str:
-    """묶음마다 주 비교군의 회복률. 행 = 비교군, 열 = 묶음. J&F 표와 J 표 두 개."""
+    """묶음마다 주 비교군·본 모델의 회복률. 행 = 방법, 열 = 묶음. J&F 표와 J 표 두 개."""
     if not groups:
         return "(없음)"
     chosen = {g: [r for r in rows if g in groups_of_row(r)] for g in groups}
-    header = ["비교군"] + [f"{g} (영상 {video_count(chosen[g])})" for g in groups]
+    header = ["방법"] + [f"{g} (영상 {video_count(chosen[g])})" for g in groups]
     parts = []
     for key, name in (("jf", "J&F"), ("j", "J")):
         lines = [[m.label] + [fmt(retention(rows_of(chosen[g], m.name), rows_of(chosen[g], "full_replay"), key))
                               for g in groups]
-                 for m in MAIN]
+                 for m in MAIN + [MODEL]]
         parts.append(f"회복률 {name}\n\n" + markdown(header, lines))
     return "\n\n".join(parts)
 

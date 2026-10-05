@@ -13,6 +13,8 @@
   - 주 표(main.md)와 추가 표(extra.md)가 나온다
   - 다시 실행하면 이미 끝난 객체는 건너뛴다
   - 기억 꺼냈다 넣기 결과가 끊지 않은 결과와 같다 (sam2_check.roundtrip)
+  - 본 모델: 받은 칸을 그대로 돌려주는 가짜 translator 면 Direct State Copy 와 점수가 같다
+  - 본 모델·비교군을 따로 돌려도 (--methods) 줄이 빠지거나 겹치지 않는다 (PUMaVOS 로 확인)
 """
 
 import runpy
@@ -26,9 +28,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import settings  # noqa: E402
+import translator  # noqa: E402
 from evaluation import records  # noqa: E402
 from evaluation.data import DATASETS, load_dataset, load_video_list  # noqa: E402
-from baseline import EXTRA, MAIN, BASELINES  # noqa: E402
+from evaluation.methods import METHODS  # noqa: E402
+from baseline import EXTRA, MAIN  # noqa: E402
 from model import sam2_check, sam2_runner  # noqa: E402
 from evaluation.scoring.main_metrics import gap_retention, retention  # noqa: E402
 
@@ -51,17 +55,25 @@ def setup(tmp: Path) -> None:
     settings.OUTPUT_ROOT = str(tmp / "outputs")
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
+    translator.load = lambda: setattr(translator, "_translator", fake_sam2.FakeTranslator())
+
+
+def dataset_rows(dataset: str) -> list[dict]:
+    folder = records.records_path(dataset).parent
+    return [r for path in sorted(folder.glob(f"{dataset}*.jsonl")) for r in records.read_rows(path)]
 
 
 def check_rows(dataset: str) -> None:
-    rows = records.read_rows(records.records_path(dataset))
+    rows = dataset_rows(dataset)
     assert rows, f"{dataset}: 결과 줄 없음"
+    assert len(records.unique_rows(rows)) == len(rows), f"{dataset}: 같은 줄이 두 번 있음"
     for entry in load_video_list(dataset)["videos"]:
         for obj in entry["objects"]:
             for sw in obj["switches"]:
-                got = {r["baseline"] for r in rows if r["video"] == entry["video"]
+                got = {r["baseline"]: r for r in rows if r["video"] == entry["video"]
                        and r["object"] == obj["object"] and r["switch_name"] == sw["name"]}
-                assert got == {m.name for m in BASELINES}, (dataset, entry["video"], sw, got)
+                assert set(got) == {m.name for m in METHODS}, (dataset, entry["video"], sw, set(got))
+                assert got["translator"]["jf"] == got["direct_state_copy"]["jf"], (dataset, entry["video"], sw)
     for r in rows:
         assert not any(k in r for k in REMOVED_COLUMNS), r
         assert r["jf"] is not None and r["n_frames"] > 0, r
@@ -72,7 +84,7 @@ def check_rows(dataset: str) -> None:
             assert r["seconds"] is None and r["extra_switch_gpu_mb"] is None, r
         else:
             assert r["seconds"] > 0, r
-        if r["role"] == "main":     # [추가] recent_k_only 는 객체가 안 보일 때 시작하면 0점이 맞음
+        if r["role"] in ("main", "model"):     # [추가] recent_k_only 는 객체가 안 보일 때 시작하면 0점이 맞음
             assert r["jf"] > 0.3, r
     replay = [r for r in rows if r["baseline"] == "full_replay"]
     source = [r for r in rows if r["baseline"] == "source_only"]
@@ -103,7 +115,7 @@ def check_tables() -> None:
     tables = Path(settings.OUTPUT_ROOT) / "tables"
     main_md = (tables / "main.md").read_text(encoding="utf-8")
     extra_md = (tables / "extra.md").read_text(encoding="utf-8")
-    for m in MAIN:
+    for m in MAIN + [translator.MODEL]:
         assert f"| {m.label} |" in main_md, m.label
     for m in EXTRA:
         assert m.label not in main_md and f"| {m.label} |" in extra_md, m.label
@@ -147,7 +159,11 @@ def test_end_to_end():
         setup(tmp)
         run_script("1_make_video_list.py")
         for dataset in DATASETS:
-            run_script("2_evaluate.py", "--dataset", dataset)
+            if dataset == "pumavos":    # 본 모델 먼저, 비교군은 나중에 따로
+                run_script("2_evaluate.py", "--dataset", dataset, "--methods", "model")
+                run_script("2_evaluate.py", "--dataset", dataset, "--methods", "baselines")
+            else:
+                run_script("2_evaluate.py", "--dataset", dataset)
 
         before = len(records.read_rows(records.records_path("vost_val")))
         run_script("2_evaluate.py", "--dataset", "vost_val")

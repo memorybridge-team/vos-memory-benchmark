@@ -33,6 +33,13 @@ OFFLOAD_STATE_TO_CPU = False             # GPU 메모리가 모자라면 True
 MEMORY_WINDOW = 16                       # 최근 몇 프레임의 기억 칸을 들고 있을지
                                          # (SAM2는 최근 6장 maskmem + 15장 obj_ptr 를 읽음)
 
+# ── 본 모델 (translator) ─────────────────────────────────────────────
+# 팀 전달본 official_state_loss_final_delivery 를 푼 폴더 (안에 selected_state_loss_best/, source/)
+TRANSLATOR_DIR = "/workspace/CMMT-official-isolated/official-20261005T012256KST/final-state-loss-20261005T1627KST/delivery"
+TRANSLATOR_WEIGHTS = "selected_state_loss_best/translator_weights.pth"   # 선정 epoch 27
+TRANSLATOR_SHA256 = "92802842b0f9c2247f95627784a4919625aaced43633c5203f619472ae0f17da"   # 전달 보고서 값
+TRANSLATOR_SOURCE = "source/src"                                          # 팀 코드 (vos_memory_inspector)
+
 # ── 영상 목록 ─────────────────────────────────────────────────────────
 MIN_TRACK_FRAMES = 8                     # 객체가 처음 보인 뒤 남은 프레임이 이보다 적으면 뺌
 

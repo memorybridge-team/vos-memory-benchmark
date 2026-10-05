@@ -1,4 +1,4 @@
-"""[주] 표: 확정 비교군 9개 × 전환 시점 25/50/75%.
+"""[주] 표: 확정 비교군 9개 + 본 모델 × 전환 시점 25/50/75%.
 
 열
   J, J&F                     전환 뒤, 객체가 보이는 프레임만
@@ -13,8 +13,9 @@ from __future__ import annotations
 from baseline import MAIN
 from evaluation.scoring.main_metrics import gap_retention, retention
 from evaluation.tables.common import fmt, main_metric, markdown, mean_over_videos, rows_of, video_count
+from translator import MODEL
 
-HEADER = ["비교군", "J", "J&F", "회복률 J", "회복률 J&F", "격차 회복률 J", "격차 회복률 J&F",
+HEADER = ["방법", "J", "J&F", "회복률 J", "회복률 J&F", "격차 회복률 J", "격차 회복률 J&F",
           "시간(초)", "영상 수"]
 
 
@@ -41,7 +42,7 @@ def baseline_table(rows: list[dict], baselines) -> str:
 
 def build(groups: dict) -> list[str]:
     """groups = {데이터셋: 결과 줄} → main.md 의 줄들."""
-    out = ["# 주 표 — 확정 비교군 9개, 전환 시점 25/50/75%\n",
+    out = ["# 주 표 — 확정 비교군 9개 + 본 모델, 전환 시점 25/50/75%\n",
            "점수 100점 만점, 영상 평균. 회복률 = 영상마다 (방법 ÷ Full Replay × 100) 의 평균.",
            "격차 회복률 = (방법 − Source-only) ÷ (Full Replay − Source-only) × 100 (영상 평균 점수로 한 번).",
            "J, J&F 는 전환 뒤 객체가 보이는 프레임 기준.",
@@ -49,5 +50,5 @@ def build(groups: dict) -> list[str]:
     for dataset, rows in groups.items():
         out += [f"## {dataset}\n",
                 f"주 지표: {main_metric(dataset)}\n",
-                baseline_table(rows, MAIN), ""]
+                baseline_table(rows, MAIN + [MODEL]), ""]
     return out

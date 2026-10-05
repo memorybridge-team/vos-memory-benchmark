@@ -30,6 +30,13 @@ def _color_of(entry):
     return None if min(c) < 0 else c
 
 
+class FakeTranslator:
+    """가짜 translator: 받은 칸을 그대로 돌려준다 → 본 모델 결과가 Direct State Copy 와 같아야 한다."""
+
+    def translate_handoff_tensors(self, spatial, pointer):
+        return spatial.clone(), pointer.clone()
+
+
 class FakeRunner:
     def __init__(self, name: str):
         self.name = name

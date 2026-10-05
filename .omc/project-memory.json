@@ -98,9 +98,45 @@
   "hotPaths": [
     {
       "path": "docs/PROTOCOL.md",
-      "accessCount": 7,
-      "lastAccessed": 1791151130611,
+      "accessCount": 9,
+      "lastAccessed": 1791209773465,
       "type": "file"
+    },
+    {
+      "path": "tests/test_end_to_end.py",
+      "accessCount": 7,
+      "lastAccessed": 1791209937346,
+      "type": "file"
+    },
+    {
+      "path": "evaluation/evaluate_video.py",
+      "accessCount": 6,
+      "lastAccessed": 1791209864371,
+      "type": "file"
+    },
+    {
+      "path": "evaluation/tables/main_tables.py",
+      "accessCount": 6,
+      "lastAccessed": 1791209902577,
+      "type": "directory"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 6,
+      "lastAccessed": 1791210085843,
+      "type": "file"
+    },
+    {
+      "path": "evaluation/tables/extra_tables.py",
+      "accessCount": 5,
+      "lastAccessed": 1791209911624,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 4,
+      "lastAccessed": 1791208646741,
+      "type": "directory"
     },
     {
       "path": "docs/EXTRAS.md",
@@ -109,34 +145,64 @@
       "type": "file"
     },
     {
-      "path": "",
-      "accessCount": 3,
-      "lastAccessed": 1791191291263,
-      "type": "directory"
-    },
-    {
-      "path": "evaluation/evaluate_video.py",
-      "accessCount": 2,
-      "lastAccessed": 1791191188040,
-      "type": "file"
-    },
-    {
-      "path": "README.md",
-      "accessCount": 2,
-      "lastAccessed": 1791194541730,
-      "type": "file"
-    },
-    {
       "path": "scripts/2_evaluate.py",
-      "accessCount": 1,
-      "lastAccessed": 1791194519481,
+      "accessCount": 3,
+      "lastAccessed": 1791209892849,
       "type": "file"
     },
     {
-      "path": "evaluation/tables/main_tables.py",
+      "path": "evaluation/records.py",
+      "accessCount": 2,
+      "lastAccessed": 1791209874047,
+      "type": "file"
+    },
+    {
+      "path": "scripts/3_make_tables.py",
+      "accessCount": 2,
+      "lastAccessed": 1791209913408,
+      "type": "file"
+    },
+    {
+      "path": "tests/fake_sam2.py",
+      "accessCount": 2,
+      "lastAccessed": 1791209922900,
+      "type": "file"
+    },
+    {
+      "path": "model/sam2_runner.py",
       "accessCount": 1,
-      "lastAccessed": 1791194608746,
-      "type": "directory"
+      "lastAccessed": 1791208645922,
+      "type": "file"
+    },
+    {
+      "path": "baseline/state_copy.py",
+      "accessCount": 1,
+      "lastAccessed": 1791208655807,
+      "type": "file"
+    },
+    {
+      "path": "evaluation/cost.py",
+      "accessCount": 1,
+      "lastAccessed": 1791209749860,
+      "type": "file"
+    },
+    {
+      "path": "settings.py",
+      "accessCount": 1,
+      "lastAccessed": 1791209781416,
+      "type": "file"
+    },
+    {
+      "path": "translator/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1791209848488,
+      "type": "file"
+    },
+    {
+      "path": "evaluation/methods.py",
+      "accessCount": 1,
+      "lastAccessed": 1791209851531,
+      "type": "file"
     }
   ],
   "userDirectives": []

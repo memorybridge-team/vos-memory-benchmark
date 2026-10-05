@@ -6,11 +6,15 @@ Video Segmentation을 실행하던 도중 작은 모델(SAM2 Small)에서 큰 �
 **Small이 지금까지 쌓은 기억을 Base+ 에 얼마나 잘 넘기는지**를 측정한다.
 주 측정 방식인 회복률은 (현재 방식으로 산출한 점수) / (Full Replay(Base+로 처음부터 끝까지 돌림)로 산출한 점수) * 100 으로 계산한다.
 
-## Only Baseline: 본 모델은 포함x
+## 평가하는 방법: 본 모델 1개 + 비교군 9개 (+ extra 진단 비교군 2개, EXTRAS.md)
 
-- 비교군 9개와 extra 진단 비교군 2개로 구성 -> extra는 EXTRAS.md 참고
-- 본 모델의 점수는 이 코드로 나오지 않으며, 결과 표(`outputs/tables/`)에 있는 것도 전부 베이스라인 점수다.
-- 본 모델을 같은 조건에서 비교하려면 똑같은 영상 목록·전환 시점·지표·회복률 계산을 써야 한다.
+- 본 모델 = 팀 translator. 전달본 `official_state_loss_final_delivery` 의 선정 epoch 27
+  (`selected_state_loss_best/translator_weights.pth`, SHA256 `92802842…`). 비교군과 같은 영상 목록·전환 시점·지표·회복률 계산.
+- 본 모델과 비교군은 따로 돌릴 수 있다: `2_evaluate.py --methods model` / `--methods baselines` (기본 = 전부).
+  Full Replay·Source-only 는 회복률의 기준이라 어느 쪽을 고르든 같이 낸다.
+- 이어하기는 (영상, 객체, 방법) 단위 → 비교군만 끝난 객체에 본 모델만 더할 수 있다.
+  두 실행이 같은 Full Replay·Source-only 줄을 쓰면 표는 한 번만 센다.
+- 시간 열을 서로 비교하려면 본 모델과 비교군을 같은 종류의 GPU 에서 돌린다.
 
 ## 데이터
 정답이 공개된 split 만 쓴다 (전환 뒤 프레임만 채점하려면 정답이 손에 있어야 함).
@@ -51,6 +55,20 @@ Video Segmentation을 실행하던 도중 작은 모델(SAM2 Small)에서 큰 �
 | Last-Visible | Small이 마지막으로 "보인다"고 한 프레임의 Small 마스크만 |
 | Original+Last-Visible | 위 둘 다 |
 | Original+Replay-4/8/16 | 처음 정답 + 전환 직전 K 프레임을 Base+ 가 다시 봄 |
+
+## 본 모델
+
+| 방법 | Base+ 가 받는 것 |
+|---|---|
+| 본 모델 (translator) | Small memory bank 의 칸마다 `maskmem_features`·`obj_ptr` 를 translator 로 바꾼 것 (다시 보기 없음) |
+
+팀 평가 코드(`vos_memory_inspector.lvos_evaluation.no_replay_case`)와 같게 한다:
+- 칸마다 따로 바꾼다 (translator 는 칸끼리 섞지 않음). 바꾸는 동안 autocast 를 끄고 fp32 로 계산하고,
+  결과는 원래 dtype (`maskmem_features` bf16, `obj_ptr` fp32) 으로 넣는다.
+- 나머지 칸 (`maskmem_pos_enc`, `pred_masks`, `object_score_logits`) 은 Direct State Copy 처럼 Small 것 그대로.
+  Base+ 가 s+1 부터 이어갈 때 SAM2 는 지난 칸의 `maskmem_features`·`maskmem_pos_enc`·`obj_ptr` 만 읽고,
+  `maskmem_pos_enc` 는 두 모델이 같은 값이다 (`0_check_sam2.py` 로 확인).
+- translator 를 GPU 에 올리는 시간은 모델 로딩이라 시간 열에 넣지 않는다. 바꾸는 시간은 넣는다 (준비 시간).
 
 ## 주요 평가 지표
 

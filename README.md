@@ -8,6 +8,7 @@ SAM2 Small → Base+ 기억 넘기기 평가. 설정·주요 평가 지표는 `d
 |---|---|
 | `model/` | SAM2 켜기·추적·기억 꺼내기/넣기 (SAM2 내부를 건드리는 곳은 여기뿐) |
 | `baseline/` | 비교군: 전환 때 Base+ 에 무엇을 넘기나 (기억 상자 포함) |
+| `translator/` | 본 모델: Small 기억 칸을 팀 translator 로 바꿔 넘긴다 (`settings.TRANSLATOR_*` 에 전달본 위치) |
 | `evaluation/` | 평가: 데이터셋·전환 시점·영상 하나 평가·비용·결과 저장, `scoring/`(지표), `tables/`(표) |
 | `scripts/` | 사람이 실행하는 것 (번호 = 순서) |
 | `settings.py` | 모든 숫자·경로 |
@@ -62,8 +63,19 @@ python scripts/3_make_tables.py
 ```
 
 결과는 `outputs/records/<데이터셋>.shard0of2.jsonl`, `shard1of2.jsonl` 로 따로 저장되고 표 만들 때 합쳐진다.
-GPU 수를 중간에 바꿔도 된다 (1개 → 2개 등): 끝난 객체는 그 데이터셋의 결과 파일 전부(`<데이터셋>.jsonl`, `.shard*.jsonl`)에서 찾아 건너뛴다.
-단, 한 데이터셋을 두 방식(`--shard` 없이 / 있게)으로 **동시에** 돌리지는 않는다 (같은 객체를 둘 다 맡아 줄이 두 번 들어감).
+GPU 수를 중간에 바꿔도 된다 (1개 → 2개 등): 끝난 (영상, 객체, 방법) 은 그 데이터셋의 결과 파일 전부(`<데이터셋>*.jsonl`)에서 찾아 건너뛴다.
+단, 같은 방법들을 두 실행(`--shard` 없이 / 있게)으로 **동시에** 돌리지는 않는다 (같은 객체를 둘 다 맡아 시간만 버림).
+
+본 모델과 비교군 따로 (예: Pod 두 개에서 동시에):
+
+```bash
+python scripts/2_evaluate.py --dataset lvos_v2_valid --methods model       # → lvos_v2_valid.model.jsonl
+python scripts/2_evaluate.py --dataset lvos_v2_valid --methods baselines   # → lvos_v2_valid.baselines.jsonl
+```
+
+Full Replay·Source-only 는 회복률의 기준이라 둘 다 낸다. 이어하기는 (영상, 객체, 방법) 단위라 이미 있는 방법은 건너뛰고,
+두 실행이 같은 Full Replay·Source-only 줄을 썼으면 표는 한 번만 센다.
+시간 열을 비교하려면 두 실행을 같은 종류의 GPU 에서 돌린다.
 
 표: `outputs/tables/main.md` (주요 평가 지표), `extra.md` (보조 평가 지표)
 
