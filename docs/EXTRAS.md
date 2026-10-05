@@ -28,7 +28,7 @@
 
 | 데이터셋 | 라벨 | 단위 | 어디서 |
 |---|---|---|---|
-| LVOS v2 | 영상 속성 13종 (OCC 가림, FM 빠른 움직임, DEF 모양 변형 ...) | 영상 | `<split>/*attribute*.json` — **배포되는지 미확인** (아래) |
+| LVOS v2 | 영상 속성 13종 (OCC 가림, FM 빠른 움직임, DEF 모양 변형 ...) | 영상 | `valid/val_meta_attribute.json` — 영상 zip 에 없어 따로 받음 (아래) |
 | M3VOS | 상태 변화 종류 (`상태 변화:separate`), 변하기 전→후 (`상태:solid→liquid`) | 객체 | `meta/all_phase_transition.json` |
 | VOST | 동작 (`변형:break`) | 영상 | 라벨 파일이 없어 공식 영상 이름 `<번호>_<동작>_<물체>` 에서 꺼냄 |
 | PUMaVOS | 없음 → 제외 | | |
@@ -37,13 +37,15 @@
 - 합치는 규칙: `evaluation/scoring/extra_groups.py` 의 `SAME_AS`. 지금은 LVOS `DEF 모양 변형` + VOST 전부 + M3VOS 전부 → `모양·상태 변화` 하나. 새로 합칠 라벨은 여기에 한 줄씩 적는다.
 - 주의: 라벨은 영상·객체 전체에 붙어 있어서, 그 일이 **전환 뒤에** 일어났는지는 모른다.
 
-#### ※ 미확인: LVOS v2 속성 파일 (2026-09-29)
+#### LVOS v2 속성 파일 (2026-10-05 확인)
 
-- 있다고 볼 근거: LVOS 논문 Table II 에 영상마다 속성 13종을 붙였다고 나오고, README 에 `x_meta_attribute.json` 모양이 설명돼 있다.
-- 없을 수 있는 근거: 공식 meta 다운로드 폴더에는 `train_meta.json`, `valid_meta.json`, `test_meta.json` 세 개뿐이다.
-- 확인 방법: `find <LVOSv2 폴더> -iname "*attribute*"`
-- 없으면: 코드는 멈추지 않는다. LVOS 라벨 표는 "(없음)" 으로 나오고, 합친 표에서 LVOS 몫이 빠진다.
-- 있는데 모양이 README 와 다르면: `evaluation/data/lvos_v2.py` 의 `load_labels()` 를 고친다.
+- 논문 (arXiv 2404.19326) Table II 에 13종 정의, "we label each sequence with 13 challenges".
+- 영상 zip 과 기본 meta json (`meta.json`, `val_meta.json`) 에는 없다 — 둘 다 객체마다 `frame_range` 만 있음 (서버 확인).
+- 공식 홈페이지 dataset 페이지의 "Jsons with attributes" (Google Drive 폴더) 에 따로 있다: `val_meta_attribute.json` (116KB). 같은 폴더에 train / test / vt 도 있다.
+- 받아서 서버 `<LVOSv2>/extracted/valid/` 에 넣었다 (2026-10-05). `load_labels()` 가 `valid/*attribute*.json` 을 읽는다.
+- 모양은 README 와 같다: 맨 위 `sets`·`attributes`(13종 약자)·`videos`, 영상마다 `attributes` 약자 목록 (예: `0tCWPOrc` → BC, LR, SV, DB, SC, AC).
+- 안 넣으면: 코드는 멈추지 않는다. LVOS 라벨 표는 "(없음)" 으로 나오고, 합친 표에서 LVOS 몫이 빠진다.
+- 받은 파일 모양이 README 와 다르면: `evaluation/data/lvos_v2.py` 의 `load_labels()` 를 고친다.
 
 ## 결과 분석: 출력 일치도
 

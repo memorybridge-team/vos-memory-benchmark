@@ -46,13 +46,10 @@ def load_labels(split: str) -> dict:
     """[추가] 공식 속성 파일 <split>/*attribute*.json 의 videos[영상]["attributes"].
     영상 단위 → {영상: {"*": ["OCC 가림", ...]}}
 
-    ※ 미확인 (2026-09-29): 이 파일이 실제로 있는지 아직 모른다.
-      - 있다고 볼 근거: LVOS 논문 Table II (영상마다 속성 13종), README 의 x_meta_attribute.json 모양 설명
-      - 없을 수 있는 근거: README 가 안내하는 공식 meta 다운로드 폴더에는 train/valid/test_meta.json 뿐
-        (이 파일들은 객체 등장 구간만 담음). 영상 zip(train.zip, valid.zip) 안에 있는지는 못 봄
-      - LVOS v2 를 서버에 받은 뒤 확인: find <LVOSv2 폴더> -iname "*attribute*"
-      - 없으면 여기서 빈 결과 → LVOS 공식 라벨 표는 "(라벨 없음)", 합친 표에서 LVOS 몫이 빠짐
-      - 있는데 모양이 README 와 다르면 아래 읽는 부분을 고칠 것
+    파일은 영상 zip 에 없어 따로 받는다: 공식 홈페이지 dataset 페이지 "Jsons with attributes" 의
+    val_meta_attribute.json → <LVOSv2>/extracted/valid/ (서버에 넣음, 2026-10-05).
+    모양: {"sets", "attributes": 13종 약자, "videos": {영상: {"attributes": ["BC", "LR", ...]}}}
+    파일이 없으면 빈 결과 → LVOS 라벨 표는 "(없음)", 합친 표에서 LVOS 몫이 빠짐.
     """
     root = _split_root(split)
     files = sorted(root.glob("*attribute*.json")) if root.is_dir() else []

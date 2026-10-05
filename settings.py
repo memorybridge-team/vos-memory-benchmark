@@ -9,10 +9,10 @@ DATA_FOLDERS = {                         # DATA_ROOT 아래 데이터셋별 폴�
     "lvos_v2": "CMMT/data/LVOSv2/extracted",
     "vost": "datasets/VOST/extracted/VOST",
     "m3vos": "CMMT/data/M3VOS-manual",
-    "pumavos": "CMMT/data/PUMaVOS/extracted",
+    "pumavos": "CMMT/data/PUMaVOS/extracted/PUBLIC_PUMaVOS",
 }
 OUTPUT_ROOT = "outputs"                  # 목록·결과·표가 모두 여기로
-SAM2_CHECKPOINT_DIR = "/workspace/checkpoints"
+SAM2_CHECKPOINT_DIR = "/workspace/CMMT/checkpoints"
 
 # ── 모델 ─────────────────────────────────────────────────────────────
 MODELS = {

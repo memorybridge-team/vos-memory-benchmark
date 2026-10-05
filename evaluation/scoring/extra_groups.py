@@ -3,7 +3,7 @@
 공식 라벨
   data/<데이터셋>.py 의 load_labels() 가 읽고, 1_make_video_list.py 가 목록의 객체마다
   "extra_labels" 로 적어 둔다. 표(tables/extra_tables.py)는 목록에서 라벨을 꺼내 쓴다.
-      lvos_v2  영상 속성 13종 (예: "OCC 가림")                       영상 단위  ※ 파일이 있는지 미확인 (data/lvos_v2.py)
+      lvos_v2  영상 속성 13종 (예: "OCC 가림")                       영상 단위  (따로 받은 valid/val_meta_attribute.json)
       m3vos    상태 변화 종류 / 변하기 전→후 (예: "상태 변화:separate")  객체 단위
       vost     영상 이름의 동작 (예: "변형:break")                    영상 단위
       pumavos  없음
@@ -18,7 +18,7 @@ from __future__ import annotations
 from evaluation.data import DATASETS
 
 SAME_AS = {
-    "lvos_v2/DEF 모양 변형": "모양·상태 변화",   # LVOS 속성 파일이 없으면 이 줄은 아무 효과 없음 (미확인)
+    "lvos_v2/DEF 모양 변형": "모양·상태 변화",   # LVOS 영상 속성 중 모양 변형만
     "vost/변형": "모양·상태 변화",          # VOST 영상은 모두 물체가 변형되는 영상
     "m3vos/상태 변화": "모양·상태 변화",    # M3VOS 객체는 모두 상태 변화 종류가 붙어 있음
 }
