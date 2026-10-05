@@ -66,16 +66,10 @@ python scripts/3_make_tables.py
 GPU 수를 중간에 바꿔도 된다 (1개 → 2개 등): 끝난 (영상, 객체, 방법) 은 그 데이터셋의 결과 파일 전부(`<데이터셋>*.jsonl`)에서 찾아 건너뛴다.
 단, 같은 방법들을 두 실행(`--shard` 없이 / 있게)으로 **동시에** 돌리지는 않는다 (같은 객체를 둘 다 맡아 시간만 버림).
 
-본 모델과 비교군 따로 (예: Pod 두 개에서 동시에):
-
-```bash
-python scripts/2_evaluate.py --dataset lvos_v2_valid --methods model       # → lvos_v2_valid.model.jsonl
-python scripts/2_evaluate.py --dataset lvos_v2_valid --methods baselines   # → lvos_v2_valid.baselines.jsonl
-```
-
-Full Replay·Source-only 는 회복률의 기준이라 둘 다 낸다. 이어하기는 (영상, 객체, 방법) 단위라 이미 있는 방법은 건너뛰고,
-두 실행이 같은 Full Replay·Source-only 줄을 썼으면 표는 한 번만 센다.
-시간 열을 비교하려면 두 실행을 같은 종류의 GPU 에서 돌린다.
+본 모델과 비교군은 한 번에 돈다 (Full Replay 를 객체마다 한 번만 계산 — 출력 일치도에 그 마스크가 필요).
+예전에 따로 돌린 `<데이터셋>.model.jsonl` · `.baselines.jsonl` 이 있으면 끝난 (영상, 객체, 방법) 은 건너뛰고,
+같은 Full Replay·Source-only 줄이 두 파일에 있으면 표는 한 번만 센다.
+시간 열을 비교하려면 모든 실행을 같은 종류의 GPU 에서 돌린다.
 
 표: `outputs/tables/main.md` (주요 평가 지표), `extra.md` (보조 평가 지표)
 

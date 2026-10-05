@@ -1,6 +1,7 @@
 """결과 한 줄씩 저장 (JSON Lines), 중단 후 이어하기.
 
-줄 하나 = (영상, 객체, 전환 시점, 방법) 하나. 파일: outputs/records/<데이터셋>[.방법][.shard].jsonl
+줄 하나 = (영상, 객체, 전환 시점, 방법) 하나. 파일: outputs/records/<데이터셋>[.shard].jsonl
+(예전에 따로 돌린 <데이터셋>.model.jsonl · .baselines.jsonl 도 같이 읽는다)
 객체 하나의 줄들은 다 만든 뒤 한꺼번에 쓴다 → 중간에 끊기면 그 객체만 다시 돌리면 된다.
 """
 
@@ -48,7 +49,7 @@ def read_rows(path: Path) -> list[dict]:
 
 def done_keys(dataset: str) -> set[tuple[str, int, str]]:
     """이미 끝난 (영상, 객체, 방법). 이 데이터셋의 결과 파일을 모두 본다 (<데이터셋>*.jsonl)
-    → GPU 수를 바꾸거나 (--shard) 본 모델·비교군을 따로 돌려도 (--methods) 끝난 것은 건너뛴다."""
+    → GPU 수를 바꾸거나 (--shard), 예전에 본 모델만 따로 돌린 결과가 있어도 끝난 것은 건너뛴다."""
     folder = records_path(dataset).parent
     return {(r["video"], r["object"], r["baseline"])
             for path in folder.glob(f"{dataset}*.jsonl") for r in read_rows(path)}
@@ -56,7 +57,7 @@ def done_keys(dataset: str) -> set[tuple[str, int, str]]:
 
 def unique_rows(rows: list[dict]) -> list[dict]:
     """같은 (데이터셋, 영상, 객체, 전환, 방법) 줄은 처음 것만.
-    본 모델·비교군을 동시에 돌리면 둘 다 Full Replay · Source-only 줄을 쓸 수 있다."""
+    예전에 본 모델·비교군을 따로 돌린 결과에는 Full Replay · Source-only 줄이 두 번 있을 수 있다."""
     seen, out = set(), []
     for r in rows:
         key = (r["dataset"], r["video"], r["object"], r["switch_name"], r["baseline"])

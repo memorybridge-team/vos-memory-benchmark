@@ -10,11 +10,11 @@ Video Segmentation을 실행하던 도중 작은 모델(SAM2 Small)에서 큰 �
 
 - 본 모델 = 팀 translator. 전달본 `official_state_loss_final_delivery` 의 선정 epoch 27
   (`selected_state_loss_best/translator_weights.pth`, SHA256 `92802842…`). 비교군과 같은 영상 목록·전환 시점·지표·회복률 계산.
-- 본 모델과 비교군은 따로 돌릴 수 있다: `2_evaluate.py --methods model` / `--methods baselines` (기본 = 전부).
-  Full Replay·Source-only 는 회복률의 기준이라 어느 쪽을 고르든 같이 낸다.
-- 이어하기는 (영상, 객체, 방법) 단위 → 비교군만 끝난 객체에 본 모델만 더할 수 있다.
-  두 실행이 같은 Full Replay·Source-only 줄을 쓰면 표는 한 번만 센다.
-- 시간 열을 서로 비교하려면 본 모델과 비교군을 같은 종류의 GPU 에서 돌린다.
+- 본 모델과 비교군은 `2_evaluate.py` 한 번에 같이 돌린다. 따로 돌리면 Full Replay 를 두 번 계산하게 되고,
+  출력 일치도는 Full Replay 마스크가 필요해 나중에 결과 파일만으로 계산할 수 없다.
+- 이어하기는 (영상, 객체, 방법) 단위 → 예전에 본 모델만 따로 돌린 결과(`<데이터셋>.model.jsonl`)가 있으면 그 객체는 나머지 방법만 돈다.
+  같은 Full Replay·Source-only 줄이 두 파일에 있으면 표는 한 번만 센다.
+- 시간 열을 서로 비교하려면 모든 실행을 같은 종류의 GPU 에서 돌린다 (`--shard` 로 나눌 때도).
 
 ## 데이터
 정답이 공개된 split 만 쓴다 (전환 뒤 프레임만 채점하려면 정답이 손에 있어야 함).

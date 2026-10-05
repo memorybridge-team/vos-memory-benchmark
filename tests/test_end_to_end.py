@@ -14,7 +14,7 @@
   - 다시 실행하면 이미 끝난 객체는 건너뛴다
   - 기억 꺼냈다 넣기 결과가 끊지 않은 결과와 같다 (sam2_check.roundtrip)
   - 본 모델: 받은 칸을 그대로 돌려주는 가짜 translator 면 Direct State Copy 와 점수가 같다
-  - 본 모델·비교군을 따로 돌려도 (--methods) 줄이 빠지거나 겹치지 않는다 (PUMaVOS 로 확인)
+  - 예전에 본 모델만 따로 돌린 결과(.model.jsonl)가 있어도 이어서 돌리면 줄이 빠지거나 겹치지 않는다 (PUMaVOS 로 확인)
 """
 
 import runpy
@@ -56,6 +56,15 @@ def setup(tmp: Path) -> None:
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
     translator.load = lambda: setattr(translator, "_translator", fake_sam2.FakeTranslator())
+
+
+def keep_only_model(dataset: str) -> None:
+    """예전에 본 모델만 따로 돌린 상태로 되돌린다: 본 모델·두 기준 줄만 <데이터셋>.model.jsonl 에 남긴다."""
+    path = records.records_path(dataset)
+    kept = [r for r in records.read_rows(path)
+            if r["baseline"] in (translator.MODEL.name, "source_only", "full_replay")]
+    path.unlink()
+    records.append_rows(path.with_name(f"{dataset}.model.jsonl"), kept)
 
 
 def dataset_rows(dataset: str) -> list[dict]:
@@ -159,11 +168,9 @@ def test_end_to_end():
         setup(tmp)
         run_script("1_make_video_list.py")
         for dataset in DATASETS:
-            if dataset == "pumavos":    # 본 모델 먼저, 비교군은 나중에 따로
-                run_script("2_evaluate.py", "--dataset", dataset, "--methods", "model")
-                run_script("2_evaluate.py", "--dataset", dataset, "--methods", "baselines")
-            else:
-                run_script("2_evaluate.py", "--dataset", dataset)
+            run_script("2_evaluate.py", "--dataset", dataset)
+        keep_only_model("pumavos")      # 예전에 본 모델만 따로 돌린 결과가 있을 때
+        run_script("2_evaluate.py", "--dataset", "pumavos")     # → 비교군만 더 돈다
 
         before = len(records.read_rows(records.records_path("vost_val")))
         run_script("2_evaluate.py", "--dataset", "vost_val")
