@@ -7,6 +7,7 @@
 
 결과: outputs/records/<데이터셋>.jsonl (끊겨도 다시 실행하면 이어서 진행)
       --shard i/n 이면 <데이터셋>.shard{i}of{n}.jsonl — 3_make_tables.py 가 records/*.jsonl 을 모두 읽어 합친다
+      끝난 객체는 이 데이터셋의 결과 파일 전부에서 찾는다 → GPU 1개로 돌다가 2개로 바꿔도 이어서 진행
 """
 
 import argparse
@@ -46,7 +47,7 @@ def main():
     small = sam2_runner.load_runner(settings.SOURCE_MODEL)
     base = sam2_runner.load_runner(settings.TARGET_MODEL)
 
-    done = records.done_objects(out_path)
+    done = records.done_objects(args.dataset)
     total = sum(len(e["objects"]) for e in entries)
     count = 0
     for entry in entries:

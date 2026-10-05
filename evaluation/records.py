@@ -46,6 +46,9 @@ def read_rows(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def done_objects(path: Path) -> set[tuple[str, int]]:
-    """이미 끝난 (영상, 객체)."""
-    return {(r["video"], r["object"]) for r in read_rows(path)}
+def done_objects(dataset: str) -> set[tuple[str, int]]:
+    """이미 끝난 (영상, 객체). <데이터셋>.jsonl 과 <데이터셋>.shard*.jsonl 을 모두 본다
+    → GPU 수를 중간에 바꿔도 (--shard 없음 ↔ 2/3개) 끝난 객체는 건너뛴다."""
+    folder = records_path(dataset).parent
+    return {(r["video"], r["object"])
+            for path in folder.glob(f"{dataset}*.jsonl") for r in read_rows(path)}

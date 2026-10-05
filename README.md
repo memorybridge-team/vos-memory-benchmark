@@ -62,7 +62,8 @@ python scripts/3_make_tables.py
 ```
 
 결과는 `outputs/records/<데이터셋>.shard0of2.jsonl`, `shard1of2.jsonl` 로 따로 저장되고 표 만들 때 합쳐진다.
-같은 데이터셋을 `--shard` 없이도 돌린 적이 있으면 그 `<데이터셋>.jsonl` 을 지우고 표를 만든다 (같은 줄이 두 번 들어감).
+GPU 수를 중간에 바꿔도 된다 (1개 → 2개 등): 끝난 객체는 그 데이터셋의 결과 파일 전부(`<데이터셋>.jsonl`, `.shard*.jsonl`)에서 찾아 건너뛴다.
+단, 한 데이터셋을 두 방식(`--shard` 없이 / 있게)으로 **동시에** 돌리지는 않는다 (같은 객체를 둘 다 맡아 줄이 두 번 들어감).
 
 표: `outputs/tables/main.md` (주요 평가 지표), `extra.md` (보조 평가 지표)
 
