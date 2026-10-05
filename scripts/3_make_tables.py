@@ -4,7 +4,7 @@
 
 읽는 것: outputs/records/*.jsonl, outputs/lists/*.json (공식 라벨)
 만드는 것 (outputs/tables/):
-  main.md   주 표: 확정 비교군 9개 × 전환 25/50/75% — J·J&F·회복률·격차 회복률·시간
+  main.md   주 표: 확정 비교군 9개 × 전환 25/50/75% — J·J&F·회복률·시간
             (evaluation/tables/main_tables.py)
   extra.md  추가 표: 비용 세부, 출력 일치도, 진단 비교군, 실패 분석, 공식 라벨별
             (evaluation/tables/extra_tables.py)

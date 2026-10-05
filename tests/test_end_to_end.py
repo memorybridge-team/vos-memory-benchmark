@@ -8,7 +8,7 @@
   - 빼기로 한 열(전환 지연, 프레임당 시간, drift, ID 뒤바뀜, fit/dev ...)이 없다
   - 시간: Source-only·reset 은 없음, 나머지는 있음, Full Replay 는 전환 시점과 무관하게 같음
   - 실패 비율은 0~1, 전환 GPU 메모리 열이 있다 (GPU 가 없으면 값은 None)
-  - Full Replay: 회복률 100, 격차 회복률 100 / Source-only 격차 회복률 0
+  - Full Replay: 회복률 100
   - M3VOS 정답의 255 는 객체가 아니다
   - 주 표(main.md)와 추가 표(extra.md)가 나온다
   - 다시 실행하면 이미 끝난 객체는 건너뛴다
@@ -34,7 +34,7 @@ from evaluation.data import DATASETS, load_dataset, load_video_list  # noqa: E40
 from evaluation.methods import METHODS  # noqa: E402
 from baseline import EXTRA, MAIN  # noqa: E402
 from model import sam2_check, sam2_runner  # noqa: E402
-from evaluation.scoring.main_metrics import gap_retention, retention  # noqa: E402
+from evaluation.scoring.main_metrics import retention  # noqa: E402
 
 import fake_data  # noqa: E402
 import fake_sam2  # noqa: E402
@@ -101,8 +101,6 @@ def check_rows(dataset: str) -> None:
     for key in ("jf", "j"):
         assert abs(retention(replay, replay, key) - 100) < 1e-9
         assert retention(direct, replay, key) is not None, f"{dataset}: 회복률 {key} 없음"
-        assert abs(gap_retention(replay, source, replay, key) - 100) < 1e-9
-        assert abs(gap_retention(source, source, replay, key)) < 1e-9
     assert all(r["extra_agreement"] == 1.0 for r in replay)
     replay_seconds = {}
     for r in replay:     # Full Replay 는 한 번 돌리고 전환 시점마다 잘라 씀 → 시간이 같아야 함
@@ -129,9 +127,9 @@ def check_tables() -> None:
     for m in EXTRA:
         assert m.label not in main_md and f"| {m.label} |" in extra_md, m.label
     assert "Moment-Matched" not in main_md + extra_md
-    for column in ("회복률 J&F", "격차 회복률 J", "시간(초)"):
+    for column in ("회복률 J", "회복률 J&F", "시간(초)"):
         assert column in main_md, column
-    for column in ("속도 배수", "전환 지연"):
+    for column in ("격차 회복률", "속도 배수", "전환 지연"):
         assert column not in main_md, column
     for section in ("비용 세부", "출력 일치도", "진단 비교군", "실패 분석", "공식 라벨별"):
         assert f"### {section}" in extra_md, section
@@ -144,7 +142,7 @@ def check_tables() -> None:
     lvos = main_md.split("## lvos_v2_valid")[1].split("##")[0]
     replay_line = next(line for line in lvos.splitlines() if line.startswith("| Full Replay |"))
     cells = [c.strip() for c in replay_line.strip("|").split("|")]
-    assert cells[4] == "100.0" and cells[7] != "-", cells   # 회복률 J&F, 시간(초)
+    assert cells[4] == "100.0" and cells[5] != "-", cells   # 회복률 J&F, 시간(초)
     # 공식 라벨: 데이터셋별 표 + 합친 표
     for label in ("OCC 가림 (영상", "FM 빠른 움직임 (영상", "변형:break (영상", "상태 변화:melt (영상",
                   "상태:solid→liquid (영상"):

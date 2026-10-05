@@ -1,14 +1,10 @@
-"""[주] 지표: 결과 줄의 J·J&F, 그리고 표에서 쓰는 회복률·격차 회복률. 시간은 evaluation/cost.py.
+"""[주] 지표: 결과 줄의 J·J&F, 그리고 표에서 쓰는 회복률. 시간은 evaluation/cost.py.
 
 결과 줄 (evaluate_video.py 가 씀)
   j, jf, n_frames  전환 뒤, 정답에 객체가 보이는 프레임만의 평균.
 
 표 (tables/main_tables.py 가 씀)
   회복률(%)      영상마다 방법 ÷ Full Replay × 100 → 영상들의 평균
-  격차 회복률(%) (방법 − Source-only) ÷ (Full Replay − Source-only) × 100
-                 영상 평균 점수로 한 번만 나눈다 (C2C 논문의 PGR 과 같은 방식).
-                 영상마다 나누면 Source-only 와 Full Replay 가 거의 같은 영상에서 분모가 0 에 가까워 값이 튄다.
-                 Full Replay 가 Source-only 보다 높을 때만 낸다 (아니면 분모가 0·음수라 뜻이 뒤집힘).
 """
 
 from __future__ import annotations
@@ -49,17 +45,3 @@ def retention(rows: list[dict], replay_rows: list[dict], key: str):
     """회복률(%) — key 는 "jf" 또는 "j"."""
     value = mean(ratio_by_video(rows, replay_rows, key).values())
     return None if value is None else value * 100
-
-
-def gap_retention(rows: list[dict], source_rows: list[dict], replay_rows: list[dict], key: str):
-    """격차 회복률(%). 세 비교군 모두 점수가 있는 영상만 써서 영상 평균을 낸 뒤 한 번 나눈다.
-
-    Full Replay 가 Source-only 보다 높을 때만 낸다. 낮으면 분모가 음수라
-    예: Source-only 60, Full Replay 58, 방법 55 → (55-60)/(58-60) = 250% 처럼 뜻이 뒤집힌다.
-    """
-    method, source, replay = (video_means(r, key) for r in (rows, source_rows, replay_rows))
-    videos = method.keys() & source.keys() & replay.keys()
-    if not videos:
-        return None
-    m, s, r = (mean(d[v] for v in videos) for d in (method, source, replay))
-    return (m - s) / (r - s) * 100 if r > s else None

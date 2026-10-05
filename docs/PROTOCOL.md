@@ -94,19 +94,16 @@ J&F 회복률과 J 회복률 둘 다 낸다.
 2. 영상마다 방법 ÷ Full Replay × 100 (Full Replay 가 0점인 영상은 뺌)
 3. 영상들의 비율을 평균
 
-### 격차 회복률(%)
-
-(방법 − Source-only) ÷ (Full Replay − Source-only) × 100. C2C 논문(arXiv 2510.03215)의 PGR 과 같다.
-0% = Small 이 계속 돌린 것과 같음, 100% = Full Replay 와 같음.
-**영상 평균 점수로 한 번만 나눈다** (LLM 논문도 벤치마크 전체 점수로 한 번 계산).
-영상마다 나누면 Source-only 와 Full Replay 가 거의 같은 영상에서 분모가 0 에 가까워 값이 튄다.
-Full Replay 가 Source-only 보다 높을 때만 낸다 (낮거나 같으면 표에 "-").
-
 ### 회복률 범위 (논문 보고)
 
-논문의 주 지표는 J&F 회복률과 J&F 격차 회복률이다. 평가 세트에서는 PUMaVOS 만 쓴다
+논문의 주 지표는 J&F 회복률이다. 평가 세트에서는 PUMaVOS 만 쓴다
 (VOST 는 F 를 쓰지 않고, M3VOS 도 F 로 평가하지 않음).
-J 회복률·J 격차 회복률과 VOST·M3VOS 의 값도 코드가 계산해 결과 표에 보고하지만, 논문에는 안 쓸 수 있다.
+J 회복률과 VOST·M3VOS 의 값도 코드가 계산해 결과 표에 보고하지만, 논문에는 안 쓸 수 있다.
+
+격차 회복률((방법 − Source-only) ÷ (Full Replay − Source-only), C2C 의 PGR)은 뺐다 (2026-10-06).
+분모가 Base+ 와 Small 단독 점수 차이라, 둘이 비슷한 데이터셋에서는 값이 뒤집히거나 튄다 —
+PUMaVOS 는 Full Replay(74.3) < Source-only(75.1) 로 계산 자체가 안 됐다.
+"넘기지 않고 Small 로 계속 간 것보다 나은가"는 같은 표의 Source-only 줄(점수·회복률)과 비교해 본다.
 
 ### 시간(초)
 
