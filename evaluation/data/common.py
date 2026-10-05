@@ -33,8 +33,10 @@ class Video:
 
     @cached_property
     def size(self) -> tuple[int, int]:
-        """(높이, 너비)"""
-        with Image.open(self.frame_paths[0]) as im:
+        """(높이, 너비) = 정답 PNG 크기. SAM2 도 이 크기로 마스크를 내서 그대로 채점한다.
+        (PUMaVOS 에는 프레임 JPG 가 정답보다 큰 영상이 있음: 1620x1080 vs 720x480)"""
+        path = self.mask_paths[min(self.mask_paths)] if self.mask_paths else self.frame_paths[0]
+        with Image.open(path) as im:
             return im.height, im.width
 
     def read_labels(self, frame: int):
