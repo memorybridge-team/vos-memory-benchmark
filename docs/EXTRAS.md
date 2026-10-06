@@ -4,6 +4,12 @@
 코드: `evaluation/scoring/extra_metrics.py`, `extra_groups.py`, `evaluation/cost.py`(GPU 메모리), `baseline/extra_diagnostic.py`, 표는 `evaluation/tables/extra_tables.py`.
 결과 줄 열 이름은 모두 `extra_` 로 시작.
 
+**2026-10-06 부터 평가 실행에서 계산하지 않는다** (`settings.RUN_EXTRA = False`).
+진단 비교군(reset, recent_k_only)은 돌리지 않고, 출력 일치도·실패 비율·전환 GPU 메모리 열은 None 으로 남긴다.
+줄이는 시간: 진단 비교군 약 10% (recent_k_only 가 Base+ 로 1.5N 프레임을 추적), 출력 일치도 약 4~8% (프레임마다 IoU 5~10ms).
+그 전에 돈 PUMaVOS 전체와 M3VOS 앞부분 값은 결과 파일에 있어 추가 표에 그대로 나온다 (영상 수 열로 몇 개인지 보임).
+공식 라벨별 회복률은 주 지표 줄로 표를 만들 때 계산하므로 그대로 나온다.
+
 ## 비용 세부: 전환 GPU 메모리
 
 | 열 | 무엇 | 이유 |

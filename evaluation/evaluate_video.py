@@ -1,14 +1,14 @@
 """영상 하나의 객체 하나 × 전환 시점 전부 × 고른 방법 (비교군 · 본 모델) → 결과 줄 목록.
 
   ① Full Replay: Base+ 가 처음 ~ 끝을 한 번 추적한다 (전환 시점과 무관).
-       마스크를 압축해 들고 있는다 → 다른 방법의 [추가] 출력 일치도 기준.
+       RUN_EXTRA 면 마스크를 압축해 들고 있는다 → 다른 방법의 [추가] 출력 일치도 기준.
   ② Small 이 처음 ~ 끝을 한 번 추적한다.
        = Source-only 결과이자, 모든 방법이 같이 쓰는 전환 전 구간.
        전환 프레임마다 기억 상자(HandoffPackage)를 챙겨 둔다.
   ③ 전환 시점 × 나머지 방법: 새 Base+ 세션에 방법마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
        ①② 는 고른 방법과 상관없이 늘 돌린다 (③ 이 쓰므로). 줄은 고른 방법 것만 낸다.
   ④ Base+ 실행마다 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환이 없어 재지 않는다.
-  ⑤ 채점: 전환 뒤 J·J&F (주) + [추가] 실패 비율·출력 일치도.
+  ⑤ 채점: 전환 뒤 J·J&F (주) + [추가] 실패 비율·출력 일치도 (RUN_EXTRA 일 때만, 아니면 None).
   ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
 """
 
@@ -151,8 +151,8 @@ def _row(video, obj, sw, baseline, run, cost_info) -> dict:
     # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
     visible = [sc for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible]
     row.update(main_metrics.score_columns(visible))
-    row["extra_failure_rate"] = extra_metrics.failure_rate(visible)
-    row["extra_agreement"] = extra_metrics.agreement(run.agreement, s)
+    row["extra_failure_rate"] = extra_metrics.failure_rate(visible) if settings.RUN_EXTRA else None
+    row["extra_agreement"] = extra_metrics.agreement(run.agreement, s)    # Full Replay 마스크가 없으면 None
     row.update(cost_info)
     return row
 
@@ -163,13 +163,14 @@ def evaluate_object(video, obj, small, base, methods) -> list[dict]:
     prompt = video.object_mask(start, obj_id)
     keeper = Keeper(FrameScorer(video, obj_id))
 
-    # ① Full Replay: Base+ 처음 ~ 끝, 한 번. 마스크는 출력 일치도 기준으로 들고 있는다.
-    replay_masks = PackedMasks(video.size)
+    # ① Full Replay: Base+ 처음 ~ 끝, 한 번. RUN_EXTRA 면 마스크를 출력 일치도 기준으로 들고 있는다.
+    replay_masks = PackedMasks(video.size) if settings.RUN_EXTRA else None
     replay_run = _run_base(base, video, obj,
                            lambda session: no_handoff.full_replay(session, start, prompt),
                            keep_after=start, keeper=keeper, collect=replay_masks)
-    keeper.replay = replay_masks
-    replay_run.agreement = dict.fromkeys(replay_masks.packed, 1.0)   # 자기 자신과는 항상 같음
+    if replay_masks is not None:
+        keeper.replay = replay_masks
+        replay_run.agreement = dict.fromkeys(replay_masks.packed, 1.0)   # 자기 자신과는 항상 같음
 
     # ② Small 처음 ~ 끝
     small_run, packages = _run_small(small, video, obj, prompt, keeper)

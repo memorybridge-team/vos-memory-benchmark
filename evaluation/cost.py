@@ -7,7 +7,7 @@
   extra_switch_gpu_mb  [추가] 전환 GPU 메모리(MB): 전환 구간 GPU 메모리 최고치 − 전환 직전 사용량.
                        전환 구간 = Small 이 s 를 끝낸 뒤 ~ Base+ 가 s+1 처리 준비를 마칠 때 (바꿔 넣기 + 다시 보기).
                        전환 직전 = Base+ 세션을 연 직후.
-Source-only(전환 없음)와 reset(전환 뒤 아무것도 추적 안 함)은 둘 다 None. GPU 가 없으면 GPU 열은 None.
+Source-only(전환 없음)와 reset(전환 뒤 아무것도 추적 안 함)은 둘 다 None. GPU 가 없거나 RUN_EXTRA 가 꺼져 있으면 GPU 열은 None.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from __future__ import annotations
 import time
 
 import torch
+
+import settings
 
 NO_COST = {"seconds": None, "extra_switch_gpu_mb": None}
 
@@ -63,5 +65,5 @@ def cost_columns(run, switch_frame: int) -> dict:
     peak = run.gpu_peaks[switch_frame]
     return {
         "seconds": run.setup_seconds + sum(run.times.values()),
-        "extra_switch_gpu_mb": None if peak is None else peak - run.gpu_before_mb,
+        "extra_switch_gpu_mb": peak - run.gpu_before_mb if settings.RUN_EXTRA and peak is not None else None,
     }

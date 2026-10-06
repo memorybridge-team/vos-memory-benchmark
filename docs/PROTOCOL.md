@@ -8,6 +8,9 @@ Video Segmentation을 실행하던 도중 작은 모델(SAM2 Small)에서 큰 �
 
 ## 평가하는 방법: 본 모델 1개 + 비교군 9개 (+ extra 진단 비교군 2개, EXTRAS.md)
 
+진단 비교군과 보조 지표(출력 일치도·실패 비율·전환 GPU 메모리)는 2026-10-06 부터 평가 실행에서 계산하지 않는다
+(`settings.RUN_EXTRA = False`, 시간 줄이기). 그 전에 돈 PUMaVOS 전체와 M3VOS 앞부분에만 값이 있다.
+
 - 본 모델 = 팀 translator. 전달본 `official_state_loss_final_delivery` 의 선정 epoch 27
   (`selected_state_loss_best/translator_weights.pth`, SHA256 `92802842…`). 비교군과 같은 영상 목록·전환 시점·지표·회복률 계산.
 - 본 모델과 비교군은 `2_evaluate.py` 한 번에 같이 돌린다. 따로 돌리면 Full Replay 를 두 번 계산하게 되고,

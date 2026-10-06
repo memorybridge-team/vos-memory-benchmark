@@ -25,7 +25,7 @@ import translator  # noqa: E402
 from evaluation import records  # noqa: E402
 from evaluation.data import load_dataset, load_video_list  # noqa: E402
 from evaluation.evaluate_video import evaluate_object  # noqa: E402
-from evaluation.methods import METHODS  # noqa: E402
+from evaluation.methods import to_run  # noqa: E402
 from model import sam2_runner  # noqa: E402
 
 
@@ -54,6 +54,7 @@ def main():
     small = sam2_runner.load_runner(settings.SOURCE_MODEL)
     base = sam2_runner.load_runner(settings.TARGET_MODEL)
 
+    methods = to_run()
     done = records.done_keys(args.dataset)
     total = sum(len(e["objects"]) for e in entries)
     count = 0
@@ -61,7 +62,7 @@ def main():
         video = videos[entry["video"]]
         for obj in entry["objects"]:
             count += 1
-            todo = [m for m in METHODS if (video.name, obj["object"], m.name) not in done]
+            todo = [m for m in methods if (video.name, obj["object"], m.name) not in done]
             if not todo:
                 continue
             t0 = time.time()

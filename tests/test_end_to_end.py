@@ -15,6 +15,7 @@
   - 기억 꺼냈다 넣기 결과가 끊지 않은 결과와 같다 (sam2_check.roundtrip)
   - 본 모델: 받은 칸을 그대로 돌려주는 가짜 translator 면 Direct State Copy 와 점수가 같다
   - 예전에 본 모델만 따로 돌린 결과(.model.jsonl)가 있어도 이어서 돌리면 줄이 빠지거나 겹치지 않는다 (PUMaVOS 로 확인)
+  - RUN_EXTRA 를 끄고 이어 돌리면 끝난 객체는 건너뛰고, 나머지는 진단 비교군 없이 보조 지표 열이 None (M3VOS 로 확인)
 """
 
 import runpy
@@ -31,7 +32,7 @@ import settings  # noqa: E402
 import translator  # noqa: E402
 from evaluation import records  # noqa: E402
 from evaluation.data import DATASETS, load_dataset, load_video_list  # noqa: E402
-from evaluation.methods import METHODS  # noqa: E402
+from evaluation.methods import METHODS, to_run  # noqa: E402
 from baseline import EXTRA, MAIN  # noqa: E402
 from model import sam2_check, sam2_runner  # noqa: E402
 from evaluation.scoring.main_metrics import retention  # noqa: E402
@@ -53,6 +54,7 @@ def run_script(name: str, *args: str) -> None:
 def setup(tmp: Path) -> None:
     settings.DATA_ROOT = str(tmp / "data")
     settings.OUTPUT_ROOT = str(tmp / "outputs")
+    settings.RUN_EXTRA = True       # 전체 흐름은 진단 비교군·보조 지표까지 확인 (끈 경우는 check_main_only)
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
     translator.load = lambda: setattr(translator, "_translator", fake_sam2.FakeTranslator())
@@ -152,6 +154,24 @@ def check_tables() -> None:
     print("  OK 표: main.md / extra.md")
 
 
+def check_main_only(dataset: str) -> None:
+    """RUN_EXTRA 를 끄고 이어 돌리기: 첫 객체만 끝난 상태에서 다시 돌리면 나머지는 주 지표 방법만 돈다."""
+    path = records.records_path(dataset)
+    rows = records.read_rows(path)
+    first = (rows[0]["video"], rows[0]["object"])
+    path.unlink()
+    records.append_rows(path, [r for r in rows if (r["video"], r["object"]) == first])
+    settings.RUN_EXTRA = False
+    run_script("2_evaluate.py", "--dataset", dataset)
+    run_script("3_make_tables.py")
+    later = [r for r in dataset_rows(dataset) if (r["video"], r["object"]) != first]
+    assert later and {r["baseline"] for r in later} == {m.name for m in to_run()}, {r["baseline"] for r in later}
+    assert all(r[k] is None for r in later
+               for k in ("extra_agreement", "extra_failure_rate", "extra_switch_gpu_mb")), later[0]
+    assert all(r["jf"] is not None for r in later)
+    print(f"  OK {dataset}: RUN_EXTRA 끄고 이어 돌리기 (줄 {len(later)}개 추가)")
+
+
 def check_roundtrip() -> None:
     video = load_dataset("lvos_v2_valid")[0]
     runner = fake_sam2.FakeRunner("base_plus")
@@ -181,6 +201,7 @@ def test_end_to_end():
         run_script("3_make_tables.py")
         check_tables()
         check_roundtrip()
+        check_main_only("m3vos")
         print("\n모두 통과")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
