@@ -1,6 +1,6 @@
 # 난이도 유형별 분류
 
-`outputs/tables/extra.md`에는 50%·75% 각각의 난이도별 J·J&F·실패비율과 기존 회복률을 보고한다.
+`outputs/tables/extra.md`에는 50%·75% 각각의 난이도별 J·J&F·실패비율과 프레임별 J·J&F 회복률을 보고한다.
 실패비율·전환시간·GPU 메모리는 별도 설정 없이 항상 계산한다.
 현재 평가지표의 정의는 `docs/PROTOCOL.md`에 있다.
 

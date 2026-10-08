@@ -1,12 +1,4 @@
-"""[주] 지표: 결과 줄의 J·J&F, 그리고 표에서 쓰는 회복률. 전환 비용은 evaluation/cost.py.
-
-결과 줄 (evaluate_video.py 가 씀)
-  j, jf, n_frames  전환 뒤, 정답에 객체가 보이는 프레임만의 평균.
-
-표 (tables/main_tables.py 가 씀)
-  회복률(%)      영상마다 방법 ÷ Full Replay × 100 → 영상들의 평균
-"""
-
+"""J·J&F 구간 평균과 실패비율. 프레임별 회복률은 recovery.py."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -42,15 +34,3 @@ def video_means(rows: list[dict], key: str) -> dict[str, float]:
         if r.get(key) is not None:
             values[r["video"]].append(r[key])
     return {video: sum(v) / len(v) for video, v in values.items()}
-
-
-def ratio_by_video(top_rows: list[dict], bottom_rows: list[dict], key: str) -> dict[str, float]:
-    """영상 → top ÷ bottom. bottom 이 0 이거나 없는 영상은 뺀다."""
-    top, bottom = video_means(top_rows, key), video_means(bottom_rows, key)
-    return {v: top[v] / bottom[v] for v in top if bottom.get(v, 0) > 0}
-
-
-def retention(rows: list[dict], replay_rows: list[dict], key: str):
-    """회복률(%) — key 는 "jf" 또는 "j"."""
-    value = mean(ratio_by_video(rows, replay_rows, key).values())
-    return None if value is None else value * 100

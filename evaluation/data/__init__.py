@@ -49,7 +49,7 @@ def load_video_list(name: str) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"{path} 가 없습니다. scripts/1_make_video_list.py 를 먼저 실행하세요.")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if (data.get("evaluation_revision") != settings.EVALUATION_REVISION
+    if (data.get("evaluation_revision") != settings.VIDEO_LIST_REVISION
             or data.get("switch_basis") != "object"
             or data.get("switch_fractions") != list(settings.SWITCH_FRACTIONS)):
         raise ValueError(f"{path}의 평가 기준이 오래되었습니다. scripts/1_make_video_list.py를 다시 실행하세요.")

@@ -1,12 +1,12 @@
-"""난이도 유형별 J·J&F·실패비율과 기존 회복률. 라벨은 영상 또는 객체 전체에 붙는다."""
+"""난이도 유형별 J·J&F·실패비율과 프레임별 회복률. 라벨은 영상 또는 객체 전체에 붙는다."""
 
 from __future__ import annotations
 
 import settings
 from baseline import MAIN
 from evaluation.scoring import extra_groups
-from evaluation.scoring.main_metrics import retention
-from evaluation.tables.common import fmt, markdown, mean_over_videos, rows_of, video_count
+from evaluation.tables.summaries import format_stats, metric_stats
+from evaluation.tables.common import markdown, rows_of
 from translator import MODEL
 
 
@@ -16,22 +16,22 @@ def group_tables(rows: list[dict], groups: list[str], groups_of_row) -> str:
     parts = []
     for group in groups:
         chosen = [r for r in rows if group in groups_of_row(r)]
-        replay = rows_of(chosen, "full_replay")
         lines = []
         for method in MAIN + [MODEL]:
             mine = rows_of(chosen, method.name)
             if mine:
                 lines.append([
                     method.label,
-                    fmt(mean_over_videos(mine, "j", 100)),
-                    fmt(mean_over_videos(mine, "jf", 100)),
-                    fmt(mean_over_videos(mine, "failure_rate", 100)),
-                    fmt(retention(mine, replay, "j")),
-                    fmt(retention(mine, replay, "jf")),
-                    video_count(mine),
+                    format_stats(mine, "j", 100),
+                    format_stats(mine, "jf", 100),
+                    format_stats(mine, "failure_rate", 100),
+                    format_stats(mine, "recovery_j"),
+                    format_stats(mine, "recovery_jf"),
+                    str(metric_stats(mine, "j")["video_count"]),
+                    str(metric_stats(mine, "j")["run_count"]),
                 ])
         parts += [f"#### {group}", "",
-                  markdown(["방법", "J", "J&F", "실패 비율(%)", "회복률 J", "회복률 J&F", "영상 수"], lines), ""]
+                  markdown(["방법", "J", "J&F", "실패 비율(%)", "회복률 J", "회복률 J&F", "영상 수", "회차 수"], lines), ""]
     return "\n".join(parts)
 
 

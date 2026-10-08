@@ -55,4 +55,7 @@ J_MAIN_DATASETS = ("vost_val", "m3vos")  # 주 지표가 J 인 데이터셋 (VOS
 
 # ── 평가 지표 ────────────────────────────────────────────────────────
 RECALL_J = 0.5                          # 실패 비율: 1 − mean(J > 0.5), J는 내부적으로 0~1
-EVALUATION_REVISION = 2                 # 전환시간·시계열 등 새 정의의 결과만 이어하기와 표에 사용
+VIDEO_LIST_REVISION = 2                 # 객체 기준 50/75% 목록은 재사용
+EVALUATION_REVISION = 3                 # 프레임별 회복률·반복 번호·Native 기준 저장
+EVALUATION_RUNS = 3                     # 전체 평가 반복 횟수
+EVALUATION_SEED = 0                     # 조건별 seed의 기준값

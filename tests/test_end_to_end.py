@@ -18,10 +18,11 @@ sys.path.insert(0, str(ROOT / "tests"))
 import settings
 import translator
 from baseline import MAIN
-from evaluation import records
+from evaluation import native, records
 from evaluation.data import DATASETS, load_dataset, load_video_list, video_list_path
 from evaluation.methods import METHODS, to_run
-from evaluation.scoring.main_metrics import retention
+from evaluation.scoring.recovery import ratio
+from evaluation.scoring import recovery
 from model import sam2_check, sam2_runner
 
 import fake_data
@@ -49,25 +50,31 @@ def dataset_rows(dataset: str) -> list[dict]:
             for r in records.read_rows(path)]
 
 
-def keep_only_model(dataset: str) -> None:
-    path = records.records_path(dataset)
-    rows = [r for r in records.read_rows(path)
-            if r["baseline"] in ("translator", "source_only", "full_replay")]
-    path.unlink()
-    records.append_rows(path.with_name(f"{dataset}.model.jsonl"), rows)
-
+def keep_only_model(dataset):
+    for path in sorted(records.records_path(dataset).parent.glob(f'{dataset}.run*.jsonl')):
+        rows = [r for r in records.read_rows(path) if r['baseline'] in ('translator', 'source_only', 'full_replay')]
+        path.unlink()
+        records.append_rows(path.with_name(path.stem + '.model.jsonl'), rows)
 
 def check_rows(dataset: str) -> None:
-    rows = dataset_rows(dataset)
-    assert rows and len(records.unique_rows(rows)) == len(rows)
+    raw = dataset_rows(dataset)
+    assert raw and len(records.unique_rows(raw)) == len(raw)
+    assert all(r['recovery_reference'] == 'pending' and r['recovery_j'] is None and r['recovery_jf'] is None for r in raw)
+    before = json.dumps(raw, sort_keys=True)
+    rows = recovery.recompute(raw)
+    assert json.dumps(raw, sort_keys=True) == before
+    assert all(r['recovery_reference'] == 'native_median' and r['pending_native_n_frames'] == 0 for r in rows)
     for entry in load_video_list(dataset)["videos"]:
         for obj in entry["objects"]:
             assert [sw["name"] for sw in obj["switches"]] == ["50", "75"]
-            for sw in obj["switches"]:
-                got = {r["baseline"]: r for r in rows if r["video"] == entry["video"]
-                       and r["object"] == obj["object"] and r["switch_name"] == sw["name"]}
-                assert set(got) == {m.name for m in METHODS}
-                assert got["translator"]["jf"] == got["direct_state_copy"]["jf"]
+            for run_id in range(1, settings.EVALUATION_RUNS + 1):
+                for sw in obj["switches"]:
+                    got = {r["baseline"]: r for r in rows if r["video"] == entry["video"]
+                           and r["object"] == obj["object"] and r["switch_name"] == sw["name"]
+                           and r["run_id"] == run_id}
+                    assert set(got) == {m.name for m in METHODS}
+                    assert got["translator"]["jf"] == got["direct_state_copy"]["jf"]
+                    assert len({r['native_reference_id'] for r in got.values()}) == 1
     for row in rows:
         assert not REMOVED_COLUMNS.intersection(row)
         assert row["evaluation_revision"] == settings.EVALUATION_REVISION
@@ -76,8 +83,20 @@ def check_rows(dataset: str) -> None:
         assert row["n_frames"] == len(row["frame_scores"])
         assert abs(row["failure_rate"] - sum(p["j"] <= 0.5 for p in row["frame_scores"]) / row["n_frames"]) < 1e-12
         assert abs(row["jf"] - sum(p["jf"] for p in row["frame_scores"]) / row["n_frames"]) < 1e-12
+        assert row['run_id'] in (1, 2, 3) and row['seed'] == settings.EVALUATION_SEED
+        assert row['pre_switch_frame_scores']
+        for point in row['pre_switch_frame_scores']:
+            assert point['frames_after_switch'] <= 0
+            assert point['recovery_j'] is None and point['recovery_jf'] is None
         for point in row["frame_scores"]:
             assert point["frames_after_switch"] == point["frame"] - row["switch_frame"] > 0
+            for metric in ('j', 'jf'):
+                assert point[f'recovery_{metric}'] == ratio(point[metric], point[f'native_{metric}'])
+        for metric in ('j', 'jf'):
+            values = [p[f'recovery_{metric}'] for p in row['frame_scores'] if p[f'recovery_{metric}'] is not None]
+            assert row[f'recovery_{metric}_n_frames'] == len(values)
+            if values:
+                assert abs(row[f'recovery_{metric}'] - sum(values) / len(values)) < 1e-9
         if row["baseline"] == "source_only":
             assert row["switch_seconds"] is None and row["switch_gpu_mb"] is None
         else:
@@ -85,11 +104,18 @@ def check_rows(dataset: str) -> None:
         assert "switch_gpu_mb" in row
 
     replay = [r for r in rows if r["baseline"] == "full_replay"]
-    for key in ("j", "jf"):
-        assert abs(retention(replay, replay, key) - 100) < 1e-9
+    for row in replay:
+        assert row['recovery_j'] == row['recovery_jf'] == 100
+    refs = native.load_references(dataset)
+    objects = sum(len(v['objects']) for v in load_video_list(dataset)['videos'])
+    assert len(refs) == objects * 3
+    assert len(rows) == objects * 3 * 2 * len(METHODS)
+    assert all(len({r['native_reference_id'] for r in rows if r['run_id'] == ref['run_id']
+                    and r['video'] == ref['video'] and r['object'] == ref['object']}) == 1
+               for ref in refs.values())
     for row in replay:
         if row["switch_name"] == "50":
-            later = next(r for r in replay if r["video"] == row["video"] and r["object"] == row["object"] and r["switch_name"] == "75")
+            later = next(r for r in replay if r["video"] == row["video"] and r["object"] == row["object"] and r["switch_name"] == "75" and r["run_id"] == row["run_id"])
             assert later["switch_seconds"] >= row["switch_seconds"], (row, later)
 
     # 객체 2는 12~17 프레임에 안 보인다. 경과 프레임을 압축해 새로 번호 매기지 않는다.
@@ -121,7 +147,27 @@ def check_tables() -> None:
         points = list(csv.DictReader(stream))
     assert points and {p["switch_name"] for p in points} == {"50", "75"}
     assert {p["baseline"] for p in points} == {m.name for m in METHODS}
-    assert all(int(p["frames_after_switch"]) > 0 and 0 <= float(p["jf"]) <= 100 for p in points)
+    assert {p['phase'] for p in points} == {'pre', 'post'}
+    assert any(int(p['frames_after_switch']) < 0 for p in points)
+    assert all(0 <= float(p['jf']) <= 100 and int(p['jf_run_count']) == 3 for p in points)
+    assert all(p['recovery_j'] == p['recovery_jf'] == '' for p in points if p['phase'] == 'pre')
+    native_points = [p for p in points if p['baseline'] == 'full_replay' and p['phase'] == 'post']
+    assert all(float(p['recovery_j']) == float(p['recovery_jf']) == 100 for p in native_points)
+    for name in ('summary.csv', 'per_run.csv', 'per_video.csv'):
+        with (tables / name).open(encoding='utf-8-sig', newline='') as stream:
+            result = list(csv.DictReader(stream))
+        assert result
+        if name == 'summary.csv':
+            assert all(int(r['j_run_count']) == 3 and float(r['j_std']) == 0 for r in result)
+        else:
+            assert {int(r['run_id']) for r in result} == {1, 2, 3}
+    assert '±' in main and '회차 수' in main and 'Native 기준=median' in main
+    with (tables / 'native_reference.csv').open(encoding='utf-8-sig', newline='') as stream:
+        reference = list(csv.DictReader(stream))
+    assert reference and all(r['native_statistic'] == 'median' and int(r['native_reference_count']) == 3 for r in reference)
+    assert all(r['native_reference_ready'] == 'True' for r in reference)
+    snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*.median.jsonl'))
+    assert snapshots and all(r['recovery_reference'] == 'native_median' for r in records.read_rows(snapshots[0]))
     print("  OK 결과표: 전환별 요약, 난이도 성능, temporal.csv")
 
 
@@ -135,6 +181,8 @@ def check_legacy_results(dataset: str) -> None:
         dict(source, baseline="original_replay_16"),
         dict(source, baseline="reset", role="extra"),
         dict(source, switch_name="25"),
+        dict(source, evaluation_revision=2),
+        {k: v for k, v in source.items() if k != 'run_id'},
     ]
     assert records.current_rows(incompatible) == []
     path = records.records_path(dataset).with_name(f"{dataset}.legacy.jsonl")
@@ -146,19 +194,32 @@ def check_legacy_results(dataset: str) -> None:
     print("  OK 이전 평가 기준과 제거된 비교군 결과 제외")
 
 
-def check_partial_resume(dataset: str) -> None:
-    path = records.records_path(dataset)
+def check_partial_resume(dataset):
+    path = records.records_path(dataset).with_name(f'{dataset}.run2.jsonl')
     rows = records.read_rows(path)
-    missing = next(r for r in rows if r["baseline"] == "translator" and r["switch_name"] == "75")
+    missing = next(r for r in rows if r['baseline'] == 'translator' and r['switch_name'] == '75')
     path.unlink()
     records.append_rows(path, [r for r in rows if r is not missing])
-    run_script("2_evaluate.py", "--dataset", dataset)
+    old_track = fake_sam2.FakeSession.track
+
+    def forbid_native(self, first, last):
+        if self.runner.name == 'base_plus' and self.cond and first == min(self.cond):
+            raise AssertionError('이어하기에서 Native를 다시 실행함')
+        yield from old_track(self, first, last)
+
+    fake_sam2.FakeSession.track = forbid_native
+    try:
+        run_script('2_evaluate.py', '--dataset', dataset)
+    finally:
+        fake_sam2.FakeSession.track = old_track
     completed = records.read_rows(path)
     assert len(completed) == len(rows)
     assert len(records.unique_rows(completed)) == len(completed)
-    assert any(records.row_key(r) == records.row_key(missing) for r in completed)
-    print("  OK 일부 전환만 빠진 객체도 중복 없이 이어서 평가")
-
+    restored = next(r for r in completed if records.row_key(r) == records.row_key(missing))
+    assert restored['native_reference_id'] == missing['native_reference_id']
+    assert restored['frame_scores'] == missing['frame_scores']
+    assert restored['recovery_j'] == missing['recovery_j']
+    print('  OK 회차별 일부 전환 이어하기, Native 기준 재실행 없이 유지')
 
 def check_old_list_rejected(dataset: str) -> None:
     path = video_list_path(dataset)
@@ -291,7 +352,11 @@ def test_end_to_end():
         check_partial_resume("m3vos")
         check_legacy_results("vost_val")
         check_old_list_rejected("m3vos")
+        raw_before = {d: dataset_rows(d) for d in DATASETS}
+        run_script('3_make_tables.py', '--native-statistic', 'mean')
+        assert (Path(settings.OUTPUT_ROOT) / 'analysis' / 'recovery.seed0.runs3.mean.jsonl').exists()
         run_script("3_make_tables.py")
+        assert all(dataset_rows(d) == raw_before[d] for d in DATASETS)
         check_tables()
         check_roundtrip()
         print("모두 통과")

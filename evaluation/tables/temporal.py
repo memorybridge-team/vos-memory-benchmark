@@ -1,33 +1,41 @@
-"""전환 후 경과 프레임별 J·J&F. 각 시간점에서 객체 평균 → 영상 평균."""
-
-from __future__ import annotations
+"""전환 전후 전체 곡선. 시간점별 객체 → 영상 평균 후 회차 평균·표본 분산."""
 
 from collections import defaultdict
 
 from evaluation.methods import METHODS
-from evaluation.scoring.main_metrics import mean
+from evaluation.tables.summaries import metric_stats
 
-CSV_FIELDS = ["dataset", "switch_name", "baseline", "frames_after_switch",
-              "j", "jf", "video_count", "object_count"]
+METRICS = {'j': 100, 'jf': 100, 'native_j': 100, 'native_jf': 100,
+           'native_run_j': 100, 'native_run_jf': 100,
+           'recovery_j': 1, 'recovery_jf': 1}
+CSV_FIELDS = ['dataset', 'switch_name', 'baseline', 'phase', 'frames_after_switch'] + [
+    name for m in METRICS for name in (m, f'{m}_std', f'{m}_variance', f'{m}_run_count')
+] + ['video_count', 'object_count', 'recovery_j_object_count', 'recovery_jf_object_count']
 
 
-def build(rows: list[dict]) -> list[dict]:
-    values = defaultdict(lambda: defaultdict(list))
-    for row in rows:
-        for point in row["frame_scores"]:
-            key = (row["dataset"], row["switch_name"], row["baseline"], point["frames_after_switch"])
-            values[key][row["video"]].append(point)
-
-    order = {method.name: i for i, method in enumerate(METHODS)}
+def build(rows):
+    values = defaultdict(list)
+    for index, row in enumerate(rows):
+        points = row.get('pre_switch_frame_scores', []) + row['frame_scores']
+        for point in points:
+            key = (row['dataset'], row['switch_name'], row['baseline'], point['frames_after_switch'])
+            values[key].append({
+                'dataset': row['dataset'], 'video': row['video'],
+                'object': row.get('object', index), 'run_id': row.get('run_id', 1),
+                'switch_name': row['switch_name'], 'switch_frame': row.get('switch_frame', 0),
+                **point})
+    order = {m.name: i for i, m in enumerate(METHODS)}
     out = []
     for key in sorted(values, key=lambda k: (k[0], int(k[1]), order[k[2]], k[3])):
-        videos = values[key]
-        out.append({
-            "dataset": key[0], "switch_name": key[1], "baseline": key[2],
-            "frames_after_switch": key[3],
-            "j": mean(mean(p["j"] for p in points) for points in videos.values()) * 100,
-            "jf": mean(mean(p["jf"] for p in points) for points in videos.values()) * 100,
-            "video_count": len(videos),
-            "object_count": sum(len(points) for points in videos.values()),
-        })
+        stats = {m: metric_stats(values[key], m, scale) for m, scale in METRICS.items()}
+        result = {'dataset': key[0], 'switch_name': key[1], 'baseline': key[2],
+                  'phase': 'post' if key[3] > 0 else 'pre', 'frames_after_switch': key[3],
+                  'video_count': stats['j']['video_count'], 'object_count': stats['j']['object_count'],
+                  'recovery_j_object_count': stats['recovery_j']['object_count'],
+                  'recovery_jf_object_count': stats['recovery_jf']['object_count']}
+        for metric, item in stats.items():
+            result[metric] = item['mean']
+            for name in ('std', 'variance', 'run_count'):
+                result[f'{metric}_{name}'] = item[name]
+        out.append(result)
     return out

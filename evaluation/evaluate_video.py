@@ -5,9 +5,9 @@
        = Source-only 결과이자, 모든 방법이 같이 쓰는 전환 전 구간.
        전환 프레임마다 기억 상자(HandoffPackage)를 챙겨 둔다.
   ③ 전환 시점 × 나머지 방법: 새 Base+ 세션에 방법마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
-       ①② 는 고른 방법과 상관없이 늘 돌린다 (③ 이 쓰므로). 줄은 고른 방법 것만 낸다.
+       ① Native는 회차별 저장된 기준이 있으면 재사용한다. Small은 필요한 객체마다 실행한다.
   ④ 전환 준비와 replay 구간만 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환 없음.
-  ⑤ 채점: 전환 뒤 J·J&F·실패 비율과 프레임별 점수.
+  ⑤ 채점: J·J&F·실패 비율·프레임별 회복률과 전환 전후 곡선.
   ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
 """
 
@@ -18,10 +18,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 import settings
-from evaluation import cost
+from evaluation import cost, native, repeats
 from baseline import no_handoff
 from baseline.handoff import HandoffPackage
-from evaluation.scoring import jf, main_metrics
+from evaluation.scoring import jf, main_metrics, recovery
 
 
 @dataclass
@@ -117,52 +117,73 @@ def _run_base(base, video, obj, prepare, keep_after, keeper):
     return run
 
 
-def _row(video, obj, sw, baseline, run, cost_info) -> dict:
+def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, seed) -> dict:
     s = sw["frame"]
     row = {"dataset": video.dataset, "video": video.name, "object": obj["object"],
            "switch_name": sw["name"], "switch_frame": s,
            "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role,
            "baseline_revision": baseline.revision,
-           "evaluation_revision": settings.EVALUATION_REVISION}
+           "evaluation_revision": settings.EVALUATION_REVISION,
+           "run_id": run_id, "seed": seed,
+           "native_reference_id": reference["native_reference_id"]}
     # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
     scored = [(f, sc) for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible]
     visible = [sc for _, sc in scored]
     row.update(main_metrics.score_columns(visible))
     row["failure_rate"] = main_metrics.failure_rate(visible)
-    row["frame_scores"] = [{"frame": f, "frames_after_switch": f - s,
-                            "j": sc.j, "f": sc.f, "jf": sc.jf} for f, sc in scored]
+    reference_scores = native.scores(reference)
+    row["frame_scores"] = [recovery.raw_point(f, sc, reference_scores.get(f), s) for f, sc in scored]
+    row.update(recovery.columns(row["frame_scores"]))
+    row["pre_switch_frame_scores"] = [
+        recovery.raw_point(f, sc, reference_scores.get(f), s)
+        for f, sc in sorted(pre_run.scores.items()) if f <= s and sc.gt_visible]
+    row['recovery_reference'] = 'pending'
+    row['pending_native_n_frames'] = len(row['frame_scores'])
     row.update(cost_info)
     return row
 
 
-def evaluate_object(video, obj, small, base, methods) -> list[dict]:
-    """methods = 결과 줄을 낼 방법들 (evaluation/methods.py)."""
+def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
+                    native_reference=None, save_native=None) -> list[dict]:
+    """각 회차 Native를 한 번만 실행/저장하고 모든 방법·50/75%에 공유한다."""
+    seed = settings.EVALUATION_SEED if seed is None else seed
     obj_id, start = obj["object"], obj["start"]
     prompt = video.object_mask(start, obj_id)
     keeper = Keeper(FrameScorer(video, obj_id))
 
-    # ① Base+ Native 결과는 객체마다 한 번 실행하고 전환 뒤 구간을 잘라 쓴다.
-    replay_run = _run_base(base, video, obj,
-                           lambda session: no_handoff.full_replay(session, start, prompt),
-                           keep_after=start, keeper=keeper)
+    reference = native_reference
+    if reference is None:
+        repeats.seed_condition(seed, run_id, video.dataset, video.name, obj_id, "full_replay")
+        replay_run = _run_base(base, video, obj,
+                              lambda session: no_handoff.full_replay(session, start, prompt),
+                              keep_after=start - 1, keeper=keeper)
+        reference = native.pack(video, obj, replay_run, run_id, seed)
+        if save_native is not None:
+            save_native(reference)
+    elif native.reference_key(reference) != native.case_key(video, obj, run_id, seed):
+        raise ValueError("Native의 영상·객체·전환·회차·seed가 평가 조건과 다릅니다.")
+    replay_run = Run(scores=native.scores(reference))
 
-    # ② Small 처음 ~ 끝
+    repeats.seed_condition(seed, run_id, video.dataset, video.name, obj_id, "source_only")
     small_run, packages = _run_small(small, video, obj, prompt, keeper)
 
-    # ③ 전환 시점 × 방법
     rows = []
     for sw in obj["switches"]:
         s = sw["frame"]
         pkg = packages[s]
         for baseline in methods:
             if baseline.name == "source_only":
-                run = small_run
+                run, cost_info = small_run, cost.NO_COST
             elif baseline.name == "full_replay":
-                run = replay_run
+                run, cost_info = replay_run, reference["costs"][str(s)]
             else:
+                repeats.seed_condition(seed, run_id, video.dataset, video.name, obj_id,
+                                       f"{baseline.name}/{sw['name']}/{s}")
                 run = _run_base(base, video, obj,
                                 lambda session: baseline.prepare(session, pkg),
                                 keep_after=s, keeper=keeper)
-            cost_info = cost.NO_COST if run is small_run else cost.cost_columns(run, s)
-            rows.append(_row(video, obj, sw, baseline, run, cost_info))
+                cost_info = cost.cost_columns(run, s)
+            pre_run = replay_run if baseline.name == "full_replay" else small_run
+            rows.append(_row(video, obj, sw, baseline, run, cost_info,
+                             reference, pre_run, run_id, seed))
     return rows

@@ -49,7 +49,7 @@ def make_list(dataset: str) -> dict:
         entries.append({"video": video.name, "num_frames": video.num_frames, "objects": objects})
         if i % 50 == 0 or i == len(videos):
             print(f"  {dataset}: {i}/{len(videos)}")
-    return {"dataset": dataset, "evaluation_revision": settings.EVALUATION_REVISION,
+    return {"dataset": dataset, "evaluation_revision": settings.VIDEO_LIST_REVISION,
             "switch_basis": "object", "switch_fractions": list(settings.SWITCH_FRACTIONS),
             "skipped_short_objects": skipped, "videos": entries}
 

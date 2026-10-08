@@ -1,15 +1,11 @@
-"""[2] 데이터셋 하나 평가: 목록의 영상 × 객체 × 전환 시점 × 방법 전부 (비교군 · 본 모델 한 번에).
+"""[2] 전체 방법을 기본 3회 평가. JSONL로 회차별 저장하고 중단 후 이어한다.
 
-    python scripts/2_evaluate.py --dataset lvos_v2_valid --max-videos 5   # 개발 중
-    python scripts/2_evaluate.py --dataset lvos_v2_valid                  # 검증
-    python scripts/2_evaluate.py --dataset vost_val                       # 평가 (m3vos, pumavos 도)
-    CUDA_VISIBLE_DEVICES=1 python scripts/2_evaluate.py --dataset vost_val --shard 1/2   # GPU 2개 중 두 번째
+python scripts/2_evaluate.py --dataset vost_val
+python scripts/2_evaluate.py --dataset vost_val --runs 1
+python scripts/2_evaluate.py --dataset vost_val --run-id 2 --shard 0/2
 
-결과: outputs/records/<데이터셋>.jsonl (끊겨도 다시 실행하면 이어서 진행)
-      --shard i/n 이면 끝에 .shard{i}of{n} 이 붙는다 — 3_make_tables.py 가 records/*.jsonl 을 모두 읽어 합친다
-      끝난 (영상, 객체, 전환, 방법) 은 이 데이터셋의 결과 파일 전부에서 찾는다
-      → GPU 수를 바꾸거나, 예전에 본 모델만 따로 돌린 결과(<데이터셋>.model.jsonl)가 있어도 이어서 진행
-Full Replay와 Source-only는 객체마다 한 번씩 실행하고 각 전환 뒤 구간을 잘라 쓴다.
+Native는 각 회차·영상·객체에서 한 번 실행하여 50/75%와 모든 방법에 공유한다.
+outputs/native/의 기준 파일을 이어하기에서도 재사용한다. 낮은 성능/빈 예측은 제외하지 않는다.
 """
 
 import argparse
@@ -19,62 +15,93 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import settings  # noqa: E402
-import translator  # noqa: E402
-from evaluation import records  # noqa: E402
-from evaluation.data import load_dataset, load_video_list  # noqa: E402
-from evaluation.evaluate_video import evaluate_object  # noqa: E402
-from evaluation.methods import to_run  # noqa: E402
-from model import sam2_runner  # noqa: E402
+import settings
+import translator
+from evaluation import native, records
+from evaluation.data import load_dataset, load_video_list
+from evaluation.evaluate_video import evaluate_object
+from evaluation.methods import to_run
+from model import sam2_runner
+
+
+def positive(value):
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError('1 이상의 정수가 필요합니다.')
+    return value
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", required=True)
-    parser.add_argument("--max-videos", type=int, default=None)
-    parser.add_argument("--videos", nargs="*", default=None, help="이 영상들만")
-    parser.add_argument("--shard", default=None, help="i/n: 영상을 n 묶음으로 나눠 i번째만 (GPU 여러 개)")
+    parser.add_argument('--dataset', required=True)
+    parser.add_argument('--max-videos', type=positive, default=None)
+    parser.add_argument('--videos', nargs='*', default=None)
+    parser.add_argument('--shard', default=None, help='i/n: 영상 분할')
+    repeat = parser.add_mutually_exclusive_group()
+    repeat.add_argument('--runs', type=positive, default=None, help='1~N회 평가 (기본 3)')
+    repeat.add_argument('--run-id', type=positive, help='이 회차만 평가')
+    parser.add_argument('--seed', type=int, default=settings.EVALUATION_SEED)
     args = parser.parse_args()
+    run_ids = [args.run_id] if args.run_id else range(1, (args.runs or settings.EVALUATION_RUNS) + 1)
 
-    entries = load_video_list(args.dataset)["videos"]
+    entries = load_video_list(args.dataset)['videos']
     if args.videos:
-        entries = [e for e in entries if e["video"] in args.videos]
+        entries = [e for e in entries if e['video'] in args.videos]
     if args.max_videos:
         entries = entries[:args.max_videos]
-    name = args.dataset
-    if args.shard:      # 영상을 번갈아 n 묶음으로 나눠 i번째만 돌리고, 결과도 따로 저장
-        i, n = map(int, args.shard.split("/"))
+    suffix = ''
+    if args.shard:
+        try:
+            i, n = map(int, args.shard.split('/'))
+            if not 0 <= i < n:
+                raise ValueError
+        except ValueError:
+            parser.error('--shard는 0 <= i < n인 i/n이어야 합니다.')
         entries = entries[i::n]
-        name += f".shard{i}of{n}"
-    out_path = records.records_path(args.dataset).with_name(f"{name}.jsonl")
+        suffix = f'.shard{i}of{n}'
     videos = {v.name: v for v in load_dataset(args.dataset)}
-
     translator.load()
     small = sam2_runner.load_runner(settings.SOURCE_MODEL)
     base = sam2_runner.load_runner(settings.TARGET_MODEL)
-
     methods = to_run()
     done = records.done_keys(args.dataset)
-    total = sum(len(e["objects"]) for e in entries)
-    count = 0
-    for entry in entries:
-        video = videos[entry["video"]]
-        for obj in entry["objects"]:
-            count += 1
-            todo = [m for m in methods if any(
-                (video.name, obj["object"], sw["name"], sw["frame"], m.name) not in done
-                for sw in obj["switches"])]
-            if not todo:
-                continue
-            t0 = time.time()
-            rows = evaluate_object(video, obj, small, base, todo)
-            rows = [r for r in rows if records.row_key(r) not in done]
-            records.append_rows(out_path, rows)
-            done.update(records.row_key(r) for r in rows)
-            print(f"[{count}/{total}] {video.name} 객체 {obj['object']}: 줄 {len(rows)}개, "
-                  f"{time.time() - t0:.0f}초")
-    print(f"결과: {out_path}")
+    refs = native.load_references(args.dataset)
+    total = sum(len(e['objects']) for e in entries)
+
+    for run_id in run_ids:
+        out_path = records.records_path(args.dataset).with_name(f'{args.dataset}.run{run_id}{suffix}.jsonl')
+        ref_path = native.reference_path(args.dataset, run_id, args.shard)
+        count = 0
+        for entry in entries:
+            video = videos[entry['video']]
+            for obj in entry['objects']:
+                count += 1
+                todo = [m for m in methods if any(
+                    (run_id, args.seed, video.name, obj['object'], sw['name'], sw['frame'], m.name) not in done
+                    for sw in obj['switches'])]
+                if not todo:
+                    continue
+                ref_key = native.case_key(video, obj, run_id, args.seed)
+                existing = refs.get(ref_key)
+                # 결과만 있고 기준 파일이 유실되었다면 새 분모를 조용히 섞지 않는다.
+                has_done = any(k[:4] == (run_id, args.seed, video.name, obj['object']) for k in done)
+                if has_done and existing is None:
+                    raise ValueError(f'완료 결과의 Native 기준이 없습니다: {ref_key}. outputs/native를 복구하세요.')
+
+                def save_reference(ref):
+                    records.append_rows(ref_path, [ref])
+                    refs[ref_key] = ref
+
+                t0 = time.time()
+                rows = evaluate_object(video, obj, small, base, todo, run_id=run_id, seed=args.seed,
+                                       native_reference=existing, save_native=save_reference)
+                rows = [r for r in rows if records.row_key(r) not in done]
+                records.append_rows(out_path, rows)
+                done.update(records.row_key(r) for r in rows)
+                print(f'[회차 {run_id}, {count}/{total}] {video.name} 객체 {obj["object"]}: '
+                      f'{len(rows)}줄, {time.time() - t0:.0f}초')
+        print(f'결과: {out_path}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
