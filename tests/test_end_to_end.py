@@ -208,7 +208,22 @@ def check_tables() -> None:
     assert all(r['native_reference_ready'] == 'True' for r in reference)
     snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*.median.ratio_of_means.jsonl'))
     assert snapshots and all(r['recovery_reference'] == 'native_median' for r in records.read_rows(snapshots[0]))
-    print("  OK 결과표: 전환별 요약, 난이도 성능, temporal.csv")
+    with (tables / 'recovery_common_window.csv').open(encoding='utf-8-sig', newline='') as stream:
+        curves = list(csv.DictReader(stream))
+    assert curves and {p['switch_name'] for p in curves} == {'50', '75'}
+    assert {p['baseline'] for p in curves} == {m.name for m in METHODS}
+    figure_dir = Path(settings.OUTPUT_ROOT) / 'figures' / 'recovery_common.seed0.runs3.median'
+    windows = json.loads((figure_dir / 'windows.json').read_text(encoding='utf-8'))
+    assert len(windows) == len(DATASETS) * 2
+    for window in windows:
+        assert window['status'] == 'ok' and window['window_basis'] == 'planned_object_ranges'
+        assert window['cohort_object_count'] == window['planned_object_count']
+        chosen = [p for p in curves if p['dataset'] == window['dataset'] and p['switch_name'] == window['switch_name']]
+        assert {int(p['frames_after_switch']) for p in chosen} == set(range(-window['window_n'], window['window_n'] + 1))
+        assert all(int(p['cohort_object_count']) == window['cohort_object_count'] for p in chosen)
+        for extension in ('png', 'pdf'):
+            assert (figure_dir / f"{window['dataset']}.switch{window['switch_name']}.{extension}").stat().st_size > 1000
+    print("  OK 결과표: 전환별 요약, 난이도 성능, temporal.csv, 공통 구간 회복률 CSV/PNG/PDF")
 
 
 def check_legacy_results(dataset: str) -> None:

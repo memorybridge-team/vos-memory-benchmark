@@ -143,3 +143,17 @@ python tests/test_recovery.py
 python tests/test_restoration.py
 python tests/test_end_to_end.py
 ```
+
+### 최단 구간 회복률 그래프
+
+`python scripts/3_make_tables.py`는 데이터셋×전환 비율별 공통 구간 회복률 그래프도 만든다. Matplotlib이 필요하다(`pip install matplotlib`).
+
+- `outputs/tables/recovery_common_window.csv`: 프레임별 J·J&F 회복률 평균, 반복 표준편차·분산, 지표별 유효 영상·객체·회차 수.
+- `outputs/figures/recovery_common.seed<S>.runs<N>.<median|mean>/<데이터셋>.switch50.png` / `.pdf`, `switch75.png` / `.pdf`: 그림 하나에 J·J&F 두 패널, 각 방법의 평균 곡선.
+- 같은 폴더의 `windows.json`: n, 계획/완료 영상·객체 수, 구간을 제한한 객체, 기술적 미완료로 제외한 공통 사례, 그림에서 잘린 프레임 수.
+
+n은 전환 비율별 모든 계획 객체의 `min(s-start, end-s)` 중 최솟값이다. 객체 최초 등장 기준이므로 늦게 등장한 객체가 최단 영상보다 짧은 범위를 만들 수 있다. 원래 상대 프레임 -n~+n을 쓰고 0=s는 마지막 Small 프레임, +1은 첫 전환 후 프레임이다. 같은 방법·회차 조건이 모두 완료된 객체를 공통 모집단으로 고정한다. 시간점마다 객체→영상→회차 평균을 계산한다. 공통 Small 전환 전 선은 Source-only로 표시한다.
+
+**한계:** 긴 영상의 구간 밖은 그림에서만 잘리므로 장기 회복/악화를 대표하지 않는다. 같은 프레임 수는 같은 실제 시간·사건·난이도를 뜻하지 않는다. GT 가려짐/누락 또는 Native=0 때문에 유효 N(t)는 여전히 달라질 수 있다. 이를 CSV와 그림에 표시하고 보간하거나 0점으로 채우지 않는다. 실제 실패를 이유로 사례를 제외하지 않는다. 전체 구간 표와 원본 프레임 값은 보존한다. 곡선은 프레임별 비율의 평균이고, 표의 구간 평균 점수 비율과 구별한다. 최종 논문 표현은 추후 재검토한다.
+
+그림을 생략하려면 `python scripts/3_make_tables.py --skip-recovery-plots`를 쓴다. 공통 구간 CSV와 메타데이터는 계속 저장한다.

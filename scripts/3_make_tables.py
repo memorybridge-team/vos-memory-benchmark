@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import settings
 from evaluation import records
 from evaluation.scoring import recovery, restoration
-from evaluation.tables import extra_tables, main_tables, summaries, temporal
+from evaluation.tables import extra_tables, main_tables, summaries, temporal, recovery_curves
+from evaluation.data import load_video_list, video_list_path
 
 
 def load_raw_rows(seed=None, runs=None):
@@ -56,6 +57,8 @@ def main():
     parser.add_argument('--seed', type=int, default=settings.EVALUATION_SEED)
     parser.add_argument('--runs', type=int, default=settings.EVALUATION_RUNS)
     parser.add_argument('--native-statistic', choices=('median', 'mean'), default='median')
+    parser.add_argument('--skip-recovery-plots', action='store_true',
+                        help='공통 구간 회복률 CSV/메타데이터만 저장하고 PNG/PDF 생성은 생략')
     args = parser.parse_args()
     if args.runs < 1:
         parser.error('--runs는 1 이상이어야 합니다.')
@@ -86,6 +89,20 @@ def main():
     write_csv(out_dir / 'per_run.csv', summaries.PER_RUN_FIELDS, per_run)
     write_csv(out_dir / 'per_video.csv', summaries.PER_VIDEO_FIELDS, per_video)
     write_csv(out_dir / 'temporal.csv', temporal.CSV_FIELDS, temporal.build(rows))
+    video_lists = {dataset: load_video_list(dataset) for dataset in groups if video_list_path(dataset).exists()}
+    curves, windows = recovery_curves.build(rows, video_lists, range(1, args.runs + 1))
+    write_csv(out_dir / 'recovery_common_window.csv', recovery_curves.CSV_FIELDS, curves)
+    curve_dir = Path(settings.OUTPUT_ROOT) / 'figures' / f'recovery_common.seed{args.seed}.runs{args.runs}.{args.native_statistic}'
+    curve_dir.mkdir(parents=True, exist_ok=True)
+    (curve_dir / 'windows.json').write_text(json.dumps(windows, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    for window in windows:
+        print(f"공통 구간: {window['dataset']} 전환 {window['switch_name']}%, "
+              f"[-{window['window_n']}, +{window['window_n']}], "
+              f"영상 {window['cohort_video_count']}/{window['planned_video_count']}, "
+              f"객체 {window['cohort_object_count']}/{window['planned_object_count']}")
+    if not args.skip_recovery_plots:
+        for path in recovery_curves.plot(curves, windows, curve_dir):
+            print(f'저장: {path}')
 
 
 if __name__ == '__main__':
