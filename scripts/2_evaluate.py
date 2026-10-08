@@ -7,10 +7,9 @@
 
 결과: outputs/records/<데이터셋>.jsonl (끊겨도 다시 실행하면 이어서 진행)
       --shard i/n 이면 끝에 .shard{i}of{n} 이 붙는다 — 3_make_tables.py 가 records/*.jsonl 을 모두 읽어 합친다
-      끝난 (영상, 객체, 방법) 은 이 데이터셋의 결과 파일 전부에서 찾는다
+      끝난 (영상, 객체, 전환, 방법) 은 이 데이터셋의 결과 파일 전부에서 찾는다
       → GPU 수를 바꾸거나, 예전에 본 모델만 따로 돌린 결과(<데이터셋>.model.jsonl)가 있어도 이어서 진행
-본 모델·비교군을 한 번에 돌리는 이유: Full Replay 를 객체마다 한 번만 계산한다
-(출력 일치도는 Full Replay 마스크가 필요해 결과 파일로 대신할 수 없음).
+Full Replay와 Source-only는 객체마다 한 번씩 실행하고 각 전환 뒤 구간을 잘라 쓴다.
 """
 
 import argparse
@@ -62,12 +61,16 @@ def main():
         video = videos[entry["video"]]
         for obj in entry["objects"]:
             count += 1
-            todo = [m for m in methods if (video.name, obj["object"], m.name) not in done]
+            todo = [m for m in methods if any(
+                (video.name, obj["object"], sw["name"], sw["frame"], m.name) not in done
+                for sw in obj["switches"])]
             if not todo:
                 continue
             t0 = time.time()
             rows = evaluate_object(video, obj, small, base, todo)
+            rows = [r for r in rows if records.row_key(r) not in done]
             records.append_rows(out_path, rows)
+            done.update(records.row_key(r) for r in rows)
             print(f"[{count}/{total}] {video.name} 객체 {obj['object']}: 줄 {len(rows)}개, "
                   f"{time.time() - t0:.0f}초")
     print(f"결과: {out_path}")

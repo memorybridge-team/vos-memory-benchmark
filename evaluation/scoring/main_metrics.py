@@ -1,4 +1,4 @@
-"""[주] 지표: 결과 줄의 J·J&F, 그리고 표에서 쓰는 회복률. 시간은 evaluation/cost.py.
+"""[주] 지표: 결과 줄의 J·J&F, 그리고 표에서 쓰는 회복률. 전환 비용은 evaluation/cost.py.
 
 결과 줄 (evaluate_video.py 가 씀)
   j, jf, n_frames  전환 뒤, 정답에 객체가 보이는 프레임만의 평균.
@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+
+import settings
 
 
 def mean(values):
@@ -24,6 +26,13 @@ def score_columns(scores: list) -> dict:
     j = mean(s.j for s in scores)
     f = mean(s.f for s in scores)
     return {"j": j, "jf": (j + f) / 2, "n_frames": len(scores)}
+
+
+
+def failure_rate(scores: list):
+    """실패 비율 = 1 − mean(J > 0.5). J=0.5는 성공에 포함하지 않는다."""
+    recall = mean(s.j > settings.RECALL_J for s in scores)
+    return None if recall is None else 1 - recall
 
 
 def video_means(rows: list[dict], key: str) -> dict[str, float]:

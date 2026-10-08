@@ -5,8 +5,7 @@
 
     small_memory    SAM2 내부 기억 칸 (Direct State Copy 가 씀)
     prompt_*        처음 받은 정답 마스크 (Original-Prompt, Replay 가 씀)
-    last_visible    Small이 마지막으로 "보인다"고 한 프레임과 그 마스크 (Last-Visible 이 씀)
-    recent_masks    Small이 최근 몇 프레임에 낸 마스크 ([추가] recent_k_only 가 씀)
+    last_visible    Small의 마지막 비어 있지 않은 예측 프레임과 마스크 (Original + Last-Visible)
 
 정답은 처음 프롬프트 한 번만 들어간다. 나머지는 모두 Small이 스스로 낸 것.
 """
@@ -25,10 +24,9 @@ class HandoffPackage:
     prompt_mask: np.ndarray
     small_memory: dict                        # {프레임: 기억 칸} — sam2_runner.export_memory()
     last_visible: tuple[int, np.ndarray] | None
-    recent_masks: dict[int, np.ndarray]       # {프레임: Small 마스크}
 
     def last_visible_or_prompt(self) -> tuple[int, np.ndarray]:
-        """Small이 한 번도 '보인다'고 한 적이 없으면 처음 프롬프트를 쓴다."""
+        """Small이 비어 있지 않은 마스크를 한 번도 내지 않았으면 처음 프롬프트를 쓴다."""
         if self.last_visible is not None:
             return self.last_visible
         return self.prompt_frame, self.prompt_mask

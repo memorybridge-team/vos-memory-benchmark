@@ -1,13 +1,8 @@
-"""비용: 시간 · GPU 메모리. Base+ 실행 한 번(evaluate_video.Run)으로 결과 줄의 비용 열을 만든다.
+"""전환 비용: 준비(메모리 옮기기·변환·프롬프트 인코딩) + s까지의 replay.
 
-결과 줄에 남기는 비용 열:
-  seconds              [주] 시간: Base+ 가 한 일 전부 = 준비(프롬프트·기억 넣기) + 추적한 모든 프레임
-                       Full Replay = Base+ 로 처음 ~ 끝 전체 / 다른 비교군 = 넘기기(Replay-K 는 다시 보기 포함) + s+1 ~ 끝.
-                       Small 에서 기억 꺼내기(export)는 넣지 않는다.
-  extra_switch_gpu_mb  [추가] 전환 GPU 메모리(MB): 전환 구간 GPU 메모리 최고치 − 전환 직전 사용량.
-                       전환 구간 = Small 이 s 를 끝낸 뒤 ~ Base+ 가 s+1 처리 준비를 마칠 때 (바꿔 넣기 + 다시 보기).
-                       전환 직전 = Base+ 세션을 연 직후.
-Source-only(전환 없음)와 reset(전환 뒤 아무것도 추적 안 함)은 둘 다 None. GPU 가 없거나 RUN_EXTRA 가 꺼져 있으면 GPU 열은 None.
+Small에서 기억 꺼내기, 모델 로딩, 세션 생성과 s+1 이후 추적·채점은 제외한다.
+GPU 메모리는 같은 전환 구간의 최고치에서 준비 직전 사용량을 뺀다.
+Source-only는 전환이 없고 GPU가 없는 환경의 메모리 값은 None이다.
 """
 
 from __future__ import annotations
@@ -16,9 +11,8 @@ import time
 
 import torch
 
-import settings
 
-NO_COST = {"seconds": None, "extra_switch_gpu_mb": None}
+NO_COST = {"switch_seconds": None, "switch_gpu_mb": None}
 
 
 def now() -> float:
@@ -64,6 +58,6 @@ def cost_columns(run, switch_frame: int) -> dict:
         return dict(NO_COST)
     peak = run.gpu_peaks[switch_frame]
     return {
-        "seconds": run.setup_seconds + sum(run.times.values()),
-        "extra_switch_gpu_mb": peak - run.gpu_before_mb if settings.RUN_EXTRA and peak is not None else None,
+        "switch_seconds": run.setup_seconds + sum(seconds for f, seconds in run.times.items() if f <= switch_frame),
+        "switch_gpu_mb": peak - run.gpu_before_mb if peak is not None and run.gpu_before_mb is not None else None,
     }

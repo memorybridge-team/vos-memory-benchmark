@@ -1,14 +1,13 @@
 """영상 하나의 객체 하나 × 전환 시점 전부 × 고른 방법 (비교군 · 본 모델) → 결과 줄 목록.
 
   ① Full Replay: Base+ 가 처음 ~ 끝을 한 번 추적한다 (전환 시점과 무관).
-       RUN_EXTRA 면 마스크를 압축해 들고 있는다 → 다른 방법의 [추가] 출력 일치도 기준.
   ② Small 이 처음 ~ 끝을 한 번 추적한다.
        = Source-only 결과이자, 모든 방법이 같이 쓰는 전환 전 구간.
        전환 프레임마다 기억 상자(HandoffPackage)를 챙겨 둔다.
   ③ 전환 시점 × 나머지 방법: 새 Base+ 세션에 방법마다 다른 것을 넘기고 전환 뒤 ~ 끝 추적.
        ①② 는 고른 방법과 상관없이 늘 돌린다 (③ 이 쓰므로). 줄은 고른 방법 것만 낸다.
-  ④ Base+ 실행마다 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환이 없어 재지 않는다.
-  ⑤ 채점: 전환 뒤 J·J&F (주) + [추가] 실패 비율·출력 일치도 (RUN_EXTRA 일 때만, 아니면 None).
+  ④ 전환 준비와 replay 구간만 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환 없음.
+  ⑤ 채점: 전환 뒤 J·J&F·실패 비율과 프레임별 점수.
   ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
 """
 
@@ -22,33 +21,17 @@ import settings
 from evaluation import cost
 from baseline import no_handoff
 from baseline.handoff import HandoffPackage
-from evaluation.scoring import extra_metrics, jf, main_metrics
+from evaluation.scoring import jf, main_metrics
 
 
 @dataclass
 class Run:
-    """추적 한 번의 결과: 프레임별 점수·출력 일치도·시간, GPU 메모리."""
+    """추적 한 번의 결과: 프레임별 점수·시간, GPU 메모리."""
     scores: dict = field(default_factory=dict)     # 프레임 → FrameScore (정답 있는 프레임만)
-    agreement: dict = field(default_factory=dict)  # 프레임 → Full Replay 마스크와의 IoU
     times: dict = field(default_factory=dict)      # 프레임 → 초 (Base+ 만)
     setup_seconds: float = 0.0
     gpu_before_mb: float | None = None             # Base+ 세션을 연 직후 GPU 사용량
     gpu_peaks: dict = field(default_factory=dict)  # 프레임 → 그 프레임까지(준비 포함) GPU 최고치
-
-
-class PackedMasks:
-    """마스크를 프레임마다 압축해 둔다 (참/거짓 한 칸을 1비트로 → 8분의 1 크기)."""
-
-    def __init__(self, size):
-        self.size = size
-        self.packed = {}
-
-    def add(self, frame: int, mask: np.ndarray) -> None:
-        self.packed[frame] = np.packbits(mask)
-
-    def get(self, frame: int) -> np.ndarray:
-        height, width = self.size
-        return np.unpackbits(self.packed[frame], count=height * width).reshape(self.size).astype(bool)
 
 
 class FrameScorer:
@@ -72,49 +55,42 @@ class FrameScorer:
 
 @dataclass
 class Keeper:
-    """한 프레임 결과를 채점하고 Full Replay 와 비교한다."""
+    """정답이 있는 프레임의 점수를 보관한다."""
     scorer: FrameScorer
-    replay: PackedMasks | None = None       # ① Full Replay 가 끝난 뒤 채워짐
 
     def keep(self, run: Run, frame: int, mask: np.ndarray) -> None:
         score = self.scorer.score(frame, mask)
         if score is not None:
             run.scores[frame] = score
-        if self.replay is not None and frame in self.replay.packed:
-            run.agreement[frame] = extra_metrics.mask_iou(mask, self.replay.get(frame))
 
 
 def _run_small(small, video, obj, prompt, keeper):
     """② Small 이 처음 ~ 끝. 전환 프레임마다 기억 상자를 챙긴다."""
     start, end = obj["start"], obj["end"]
     switch_frames = {sw["frame"] for sw in obj["switches"]}
-    keep_recent = settings.EXTRA_RECENT_K + 1
-    run, packages, recent, last_visible = Run(), {}, {}, None
+    run, packages, last_visible = Run(), {}, None
 
     session = small.start(video)
     session.add_prompt(start, prompt)
     for out in session.track(start, end):
         f = out.frame
         keeper.keep(run, f, out.mask)
-        recent[f] = out.mask
-        recent.pop(f - keep_recent, None)
-        if out.visible and out.mask.any():
+        if out.mask.any():
             last_visible = (f, out.mask)
         if f in switch_frames:
             packages[f] = HandoffPackage(
                 switch_frame=f, prompt_frame=start, prompt_mask=prompt,
                 small_memory=session.export_memory(),
-                last_visible=last_visible, recent_masks=dict(recent))
+                last_visible=last_visible)
     session.close()
     return run, packages
 
 
-def _run_base(base, video, obj, prepare, keep_after, keeper, collect=None):
+def _run_base(base, video, obj, prepare, keep_after, keeper):
     """새 Base+ 세션을 prepare 로 준비하고 끝까지 추적. keep_after 보다 뒤 프레임만 결과로 남긴다.
 
     GPU: 세션을 연 직후 사용량을 적고, 준비가 끝난 때(track_from − 1 칸)와 프레임마다
     그때까지의 최고치를 적는다 → gpu_peaks[s] = Base+ 가 s+1 처리 준비를 마칠 때까지의 최고치.
-    collect 가 있으면 남긴 마스크를 거기에 압축해 모은다 (① Full Replay 만).
     """
     end = obj["end"]
     run = Run()
@@ -137,8 +113,6 @@ def _run_base(base, video, obj, prepare, keep_after, keeper, collect=None):
             run.gpu_peaks[out.frame] = cost.gpu_peak_mb()
             if out.frame > keep_after:
                 keeper.keep(run, out.frame, out.mask)
-                if collect is not None:
-                    collect.add(out.frame, out.mask)
     session.close()
     return run
 
@@ -147,12 +121,16 @@ def _row(video, obj, sw, baseline, run, cost_info) -> dict:
     s = sw["frame"]
     row = {"dataset": video.dataset, "video": video.name, "object": obj["object"],
            "switch_name": sw["name"], "switch_frame": s,
-           "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role}
+           "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role,
+           "baseline_revision": baseline.revision,
+           "evaluation_revision": settings.EVALUATION_REVISION}
     # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
-    visible = [sc for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible]
+    scored = [(f, sc) for f, sc in sorted(run.scores.items()) if f > s and sc.gt_visible]
+    visible = [sc for _, sc in scored]
     row.update(main_metrics.score_columns(visible))
-    row["extra_failure_rate"] = extra_metrics.failure_rate(visible) if settings.RUN_EXTRA else None
-    row["extra_agreement"] = extra_metrics.agreement(run.agreement, s)    # Full Replay 마스크가 없으면 None
+    row["failure_rate"] = main_metrics.failure_rate(visible)
+    row["frame_scores"] = [{"frame": f, "frames_after_switch": f - s,
+                            "j": sc.j, "f": sc.f, "jf": sc.jf} for f, sc in scored]
     row.update(cost_info)
     return row
 
@@ -163,14 +141,10 @@ def evaluate_object(video, obj, small, base, methods) -> list[dict]:
     prompt = video.object_mask(start, obj_id)
     keeper = Keeper(FrameScorer(video, obj_id))
 
-    # ① Full Replay: Base+ 처음 ~ 끝, 한 번. RUN_EXTRA 면 마스크를 출력 일치도 기준으로 들고 있는다.
-    replay_masks = PackedMasks(video.size) if settings.RUN_EXTRA else None
+    # ① Base+ Native 결과는 객체마다 한 번 실행하고 전환 뒤 구간을 잘라 쓴다.
     replay_run = _run_base(base, video, obj,
                            lambda session: no_handoff.full_replay(session, start, prompt),
-                           keep_after=start, keeper=keeper, collect=replay_masks)
-    if replay_masks is not None:
-        keeper.replay = replay_masks
-        replay_run.agreement = dict.fromkeys(replay_masks.packed, 1.0)   # 자기 자신과는 항상 같음
+                           keep_after=start, keeper=keeper)
 
     # ② Small 처음 ~ 끝
     small_run, packages = _run_small(small, video, obj, prompt, keeper)

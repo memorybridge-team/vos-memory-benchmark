@@ -1,4 +1,4 @@
-"""J, F 계산 (무시 영역 픽셀 제외). DAVIS 공식 평가 코드와 같은 정의.
+"""J, F 계산 (무시 영역 픽셀 제외). F의 허용 거리는 이미지 대각선 × 0.008.
 
 J = 겹친 넓이 / 합친 넓이 (IoU). 둘 다 비어 있으면 1.
 F = 경계선끼리 얼마나 가까운가. 대각선 × BOUNDARY_THRESHOLD 픽셀 안이면 맞은 것으로 본다.
@@ -53,25 +53,20 @@ def _boundary(mask: np.ndarray) -> np.ndarray:
     return b
 
 
-def _disk(radius: int) -> np.ndarray:
-    y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
-    return (x * x + y * y <= radius * radius).astype(np.uint8)
-
-
 def f_score(pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray | None = None) -> float:
     pred, gt = _keep(pred, ignore), _keep(gt, ignore)
-    radius = int(np.ceil(settings.BOUNDARY_THRESHOLD * np.hypot(*pred.shape)))
+    threshold = settings.BOUNDARY_THRESHOLD * np.hypot(*pred.shape)
     pred_b, gt_b = _boundary(pred), _boundary(gt)
     n_pred, n_gt = pred_b.sum(), gt_b.sum()
     if n_pred == 0 and n_gt == 0:
         return 1.0
     if n_pred == 0 or n_gt == 0:
         return 0.0
-    disk = _disk(radius)
-    pred_near = cv2.dilate(pred_b.astype(np.uint8), disk).astype(bool)
-    gt_near = cv2.dilate(gt_b.astype(np.uint8), disk).astype(bool)
-    precision = (pred_b & gt_near).sum() / n_pred
-    recall = (gt_b & pred_near).sum() / n_gt
+    # 허용 거리를 올림하지 않고, 각 테두리 점의 정확한 유클리드 거리를 비교한다.
+    to_gt = cv2.distanceTransform((~gt_b).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    to_pred = cv2.distanceTransform((~pred_b).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    precision = (to_gt[pred_b] <= threshold).sum() / n_pred
+    recall = (to_pred[gt_b] <= threshold).sum() / n_gt
     if precision + recall == 0:
         return 0.0
     return float(2 * precision * recall / (precision + recall))

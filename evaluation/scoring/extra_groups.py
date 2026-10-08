@@ -18,6 +18,8 @@ from __future__ import annotations
 from evaluation.data import DATASETS
 
 SAME_AS = {
+    "lvos_v2/OCC 가림": "가려짐",
+    "lvos_v2/CTC 닮은 물체 번갈아 등장": "비슷한 객체",
     "lvos_v2/DEF 모양 변형": "모양·상태 변화",   # LVOS 영상 속성 중 모양 변형만
     "vost/변형": "모양·상태 변화",          # VOST 영상은 모두 물체가 변형되는 영상
     "m3vos/상태 변화": "모양·상태 변화",    # M3VOS 객체는 모두 상태 변화 종류가 붙어 있음

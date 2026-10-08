@@ -1,76 +1,33 @@
-# extra (보조 평가 지표)
+# 난이도 유형별 분류
 
-주 표(`main.md`)에는 넣지 않고 추가 표(`outputs/tables/extra.md`)에만 나오는 것과 그 이유.
-코드: `evaluation/scoring/extra_metrics.py`, `extra_groups.py`, `evaluation/cost.py`(GPU 메모리), `baseline/extra_diagnostic.py`, 표는 `evaluation/tables/extra_tables.py`.
-결과 줄 열 이름은 모두 `extra_` 로 시작.
+`outputs/tables/extra.md`에는 50%·75% 각각의 난이도별 J·J&F·실패비율과 기존 회복률을 보고한다.
+실패비율·전환시간·GPU 메모리는 별도 설정 없이 항상 계산한다.
+현재 평가지표의 정의는 `docs/PROTOCOL.md`에 있다.
 
-**2026-10-06 부터 평가 실행에서 계산하지 않는다** (`settings.RUN_EXTRA = False`).
-진단 비교군(reset, recent_k_only)은 돌리지 않고, 출력 일치도·실패 비율·전환 GPU 메모리 열은 None 으로 남긴다.
-줄이는 시간: 진단 비교군 약 10% (recent_k_only 가 Base+ 로 1.5N 프레임을 추적), 출력 일치도 약 4~8% (프레임마다 IoU 5~10ms).
-그 전에 돈 PUMaVOS 전체와 M3VOS 앞부분 값은 결과 파일에 있어 추가 표에 그대로 나온다 (영상 수 열로 몇 개인지 보임).
-공식 라벨별 회복률은 주 지표 줄로 표를 만들 때 계산하므로 그대로 나온다.
+## 라벨 출처
 
-## 비용 세부: 전환 GPU 메모리
-
-| 열 | 무엇 | 이유 |
-|---|---|---|
-| extra_switch_gpu_mb | 전환 구간 GPU 메모리 최고치 − 전환 직전 GPU 사용량 (MB) | 넘기는 방법(translator) 때문에 더 큰 GPU 가 필요해지는지 |
-
-- 전환 구간 = Small 이 s 까지 처리한 뒤 ~ Base+ 가 s+1 을 처리할 준비가 끝날 때 (바꿔 넣기 + 다시 보기)
-- 전환 직전 = Base+ 세션을 연 직후 (켜 둔 두 모델·세션 무게는 여기 들어 있어 빼진다)
-- Full Replay 는 처음 ~ s 를 다시 보는 동안의 최고치. Source-only·reset 은 없음 ("-"), GPU 가 없으면 없음
-
-## 실패 분석 (전환 뒤, 정답에 객체가 보이는 프레임)
-
-| 열 | 무엇 | 이유 |
-|---|---|---|
-| extra_failure_rate | 실패 비율 = 1 − J_Recall, J_Recall = (J > `EXTRA_RECALL_J`(0.5) 인 프레임 수) ÷ (대상 프레임 수) | 전환 뒤 실패한 프레임이 얼마나 되는지 |
-
-줄(영상 × 객체 × 전환 시점)마다 계산 → 표는 영상 평균.
-
-## 조건별 분류 (데이터셋 공식 라벨)
-
-데이터셋 제작자가 붙인 라벨마다 회복률(J&F, J)을 따로 계산한다. 데이터셋별 표 + 뜻이 같은 라벨을 합친 표.
-
-| 데이터셋 | 라벨 | 단위 | 어디서 |
+| 데이터셋 | 라벨 | 단위 | 출처 |
 |---|---|---|---|
-| LVOS v2 | 영상 속성 13종 (OCC 가림, FM 빠른 움직임, DEF 모양 변형 ...) | 영상 | `valid/val_meta_attribute.json` — 영상 zip 에 없어 따로 받음 (아래) |
-| M3VOS | 상태 변화 종류 (`상태 변화:separate`), 변하기 전→후 (`상태:solid→liquid`) | 객체 | `meta/all_phase_transition.json` |
-| VOST | 동작 (`변형:break`) | 영상 | 라벨 파일이 없어 공식 영상 이름 `<번호>_<동작>_<물체>` 에서 꺼냄 |
-| PUMaVOS | 없음 → 제외 | | |
+| LVOS v2 | 영상 속성 13종(OCC, DEF, CTC 등) | 영상 | val/valid 폴더의 *attribute*.json |
+| M3VOS | 상태 변화 종류와 변화 전·후 상태 | 객체 | meta/all_phase_transition.json |
+| VOST | 동작(변형:break 등) | 영상 | 영상명 <번호>_<동작>_<물체> |
+| PUMaVOS | 없음 | | |
 
-- 라벨은 `1_make_video_list.py` 가 목록의 객체마다 `extra_labels` 로 적어 둔다.
-- 합치는 규칙: `evaluation/scoring/extra_groups.py` 의 `SAME_AS`. 지금은 LVOS `DEF 모양 변형` + VOST 전부 + M3VOS 전부 → `모양·상태 변화` 하나. 새로 합칠 라벨은 여기에 한 줄씩 적는다.
-- 주의: 라벨은 영상·객체 전체에 붙어 있어서, 그 일이 **전환 뒤에** 일어났는지는 모른다.
+LVOS 속성 파일은 영상 zip에 없으므로 별도로 넣어야 한다. 없으면 LVOS 난이도 표는 라벨 없음으로 표시한다.
+`1_make_video_list.py`가 목록의 객체별 `extra_labels`에 라벨을 저장하고, 표 생성 시 읽는다.
+이 필드 이름은 목록 메타데이터이며 별도의 평가 지표가 아니다.
 
-#### LVOS v2 속성 파일 (2026-10-05 확인)
+## 공통 난이도 유형
 
-- 논문 (arXiv 2404.19326) Table II 에 13종 정의, "we label each sequence with 13 challenges".
-- 영상 zip 과 기본 meta json (`meta.json`, `val_meta.json`) 에는 없다 — 둘 다 객체마다 `frame_range` 만 있음 (서버 확인).
-- 공식 홈페이지 dataset 페이지의 "Jsons with attributes" (Google Drive 폴더) 에 따로 있다: `val_meta_attribute.json` (116KB). 같은 폴더에 train / test / vt 도 있다.
-- 받아서 서버 `<LVOSv2>/extracted/valid/` 에 넣었다 (2026-10-05). `load_labels()` 가 `valid/*attribute*.json` 을 읽는다.
-- 모양은 README 와 같다: 맨 위 `sets`·`attributes`(13종 약자)·`videos`, 영상마다 `attributes` 약자 목록 (예: `0tCWPOrc` → BC, LR, SV, DB, SC, AC).
-- 안 넣으면: 코드는 멈추지 않는다. LVOS 라벨 표는 "(없음)" 으로 나오고, 합친 표에서 LVOS 몫이 빠진다.
-- 받은 파일 모양이 README 와 다르면: `evaluation/data/lvos_v2.py` 의 `load_labels()` 를 고친다.
+`evaluation/scoring/extra_groups.py`의 SAME_AS에 정한 라벨만 합친다.
 
-## 결과 분석: 출력 일치도
-
-| 열 | 무엇 |
+| 공통 유형 | 사용하는 라벨 |
 |---|---|
-| extra_agreement | 전환 뒤 모든 프레임마다 방법 마스크와 Full Replay 마스크의 IoU → 평균 |
+| 가려짐 | LVOS OCC(가림) |
+| 모양·상태 변화 | LVOS DEF, VOST 동작, M3VOS 상태 변화 |
+| 비슷한 객체 | LVOS CTC(닮은 물체 번갈아 등장) |
 
-정답이 아니라 Full Replay 와 비교한다 (정답이 필요 없음).
-Full Replay 마스크는 평가 중 압축해(`np.packbits`) 들고 있다.
-
-## 진단 비교군
-
-실제로 쓰지는 않을 방법이지만, 다른 비교군 점수가 왜 그렇게 나왔는지 알아보는 용도. 주 표와 같은 열.
-
-| 이름 | 무엇 | 비교 상대 |
-|---|---|---|
-| reset | Base+ 에게 아무것도 넘기지 않음 → 전환 뒤 전부 빈 마스크 | 바닥 점수 |
-| recent_k_only | 처음 정답 마스크 없이, Small 마스크 한 장(s−K+1)에서 시작해 전환 직전 최근 K 프레임만 다시 봄 (`EXTRA_RECENT_K`) | Original+Replay-K (처음 정답을 줌) — 같은 표에 나란히 |
-
-## 뺀 것
-
-지표 정의서에서 뺀 것: 전환 뒤 프레임당 시간, 틀린 픽셀 분류, drift 곡선, 입력 길이별 분류. 정의서에 없는 ID 뒤바뀜 비율도 뺐다.
+각 유형에서 객체별 평균 → 영상별 평균으로 성능을 집계한다.
+여러 데이터셋을 합칠 때는 데이터셋/영상으로 영상 이름을 구분한다.
+라벨은 영상·객체 전체에 붙어 있어서 해당 사건이 전환 뒤에 발생했는지는 알 수 없다.
+자동 추정이나 전환 프레임별 난이도 분류를 추가하지 않는다.

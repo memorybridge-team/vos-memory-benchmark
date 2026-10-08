@@ -1,20 +1,15 @@
-"""[주] 표: 확정 비교군 9개 + 본 모델 × 전환 시점 25/50/75%.
-
-열
-  J, J&F                     전환 뒤, 객체가 보이는 프레임만
-  회복률 J, 회복률 J&F         영상마다 방법 ÷ Full Replay × 100 → 평균
-  시간(초)                 Base+ 가 한 일 전부 (Full Replay = 처음 ~ 끝, 다른 비교군 = 넘기기 + s+1 ~ 끝)
-점수는 100점 만점. 데이터셋마다 주 지표(VOST·M3VOS 는 J, 나머지는 J&F)를 제목 아래에 적는다.
-"""
+"""비교군 5개 + 본 모델의 전환별 점수, 기존 회복률, 전환 비용과 실패비율."""
 
 from __future__ import annotations
 
+import settings
 from baseline import MAIN
 from evaluation.scoring.main_metrics import retention
 from evaluation.tables.common import fmt, main_metric, markdown, mean_over_videos, rows_of, video_count
 from translator import MODEL
 
-HEADER = ["방법", "J", "J&F", "회복률 J", "회복률 J&F", "시간(초)", "영상 수"]
+HEADER = ["방법", "J", "J&F", "회복률 J", "회복률 J&F",
+          "전환시간(초)", "전환 GPU 메모리(MB)", "실패 비율(%)", "영상 수"]
 
 
 def baseline_table(rows: list[dict], baselines) -> str:
@@ -30,20 +25,25 @@ def baseline_table(rows: list[dict], baselines) -> str:
             fmt(mean_over_videos(mine, "jf", 100)),
             fmt(retention(mine, replay, "j")),
             fmt(retention(mine, replay, "jf")),
-            fmt(mean_over_videos(mine, "seconds"), 2),
+            fmt(mean_over_videos(mine, "switch_seconds"), 3),
+            fmt(mean_over_videos(mine, "switch_gpu_mb"), 1),
+            fmt(mean_over_videos(mine, "failure_rate", 100)),
             video_count(mine),
         ])
     return markdown(HEADER, lines)
 
 
 def build(groups: dict) -> list[str]:
-    """groups = {데이터셋: 결과 줄} → main.md 의 줄들."""
-    out = ["# 주 표 — 확정 비교군 9개 + 본 모델, 전환 시점 25/50/75%\n",
-           "점수 100점 만점, 영상 평균. 회복률 = 영상마다 (방법 ÷ Full Replay × 100) 의 평균.",
-           "J, J&F 는 전환 뒤 객체가 보이는 프레임 기준.",
-           "시간 = Base+ 가 한 일 전부 (Full Replay = 처음 ~ 끝, 다른 비교군 = 넘기기 + s+1 ~ 끝).\n"]
+    out = ["# 평가표 — 비교군 5개 + 본 모델, 전환 시점 50/75%\n",
+           "점수는 100점 만점, 객체별 평균을 영상별로 모은 뒤 영상 평균을 보고한다.",
+           "J·J&F와 실패비율은 전환 뒤 정답에 객체가 보이는 프레임 기준.",
+           "회복률은 기존 정의를 유지하며 복원율은 추후 논의한다.",
+           "전환시간과 GPU 메모리는 준비 및 s까지의 replay 구간만 포함한다.\n"]
     for dataset, rows in groups.items():
-        out += [f"## {dataset}\n",
-                f"주 지표: {main_metric(dataset)}\n",
-                baseline_table(rows, MAIN + [MODEL]), ""]
+        out += [f"## {dataset}\n", f"주 지표: {main_metric(dataset)}\n"]
+        for fraction in settings.SWITCH_FRACTIONS:
+            name = str(round(fraction * 100))
+            mine = [r for r in rows if r["switch_name"] == name]
+            if mine:
+                out += [f"### 전환 {name}%\n", baseline_table(mine, MAIN + [MODEL]), ""]
     return out

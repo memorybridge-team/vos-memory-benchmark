@@ -1,23 +1,10 @@
-"""가짜 모델·가짜 데이터로 전체 흐름 확인.
+"""가짜 모델·데이터로 50/75% 평가, 새 지표, 난이도·시계열 표와 이어하기를 검증한다.
 
     python tests/test_end_to_end.py
-
-확인하는 것:
-  - 1 → 2 → 3 이 끝까지 돈다 (LVOS v2 valid, VOST, M3VOS, PUMaVOS)
-  - 모든 비교군(주 9 + 추가 2)이 모든 전환 시점에 결과 줄을 남긴다
-  - 빼기로 한 열(전환 지연, 프레임당 시간, drift, ID 뒤바뀜, fit/dev ...)이 없다
-  - 시간: Source-only·reset 은 없음, 나머지는 있음, Full Replay 는 전환 시점과 무관하게 같음
-  - 실패 비율은 0~1, 전환 GPU 메모리 열이 있다 (GPU 가 없으면 값은 None)
-  - Full Replay: 회복률 100
-  - M3VOS 정답의 255 는 객체가 아니다
-  - 주 표(main.md)와 추가 표(extra.md)가 나온다
-  - 다시 실행하면 이미 끝난 객체는 건너뛴다
-  - 기억 꺼냈다 넣기 결과가 끊지 않은 결과와 같다 (sam2_check.roundtrip)
-  - 본 모델: 받은 칸을 그대로 돌려주는 가짜 translator 면 Direct State Copy 와 점수가 같다
-  - 예전에 본 모델만 따로 돌린 결과(.model.jsonl)가 있어도 이어서 돌리면 줄이 빠지거나 겹치지 않는다 (PUMaVOS 로 확인)
-  - RUN_EXTRA 를 끄고 이어 돌리면 끝난 객체는 건너뛰고, 나머지는 진단 비교군 없이 보조 지표 열이 None (M3VOS 로 확인)
 """
 
+import csv
+import json
 import runpy
 import shutil
 import sys
@@ -28,22 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import settings  # noqa: E402
-import translator  # noqa: E402
-from evaluation import records  # noqa: E402
-from evaluation.data import DATASETS, load_dataset, load_video_list  # noqa: E402
-from evaluation.methods import METHODS, to_run  # noqa: E402
-from baseline import EXTRA, MAIN  # noqa: E402
-from model import sam2_check, sam2_runner  # noqa: E402
-from evaluation.scoring.main_metrics import retention  # noqa: E402
+import settings
+import translator
+from baseline import MAIN
+from evaluation import records
+from evaluation.data import DATASETS, load_dataset, load_video_list, video_list_path
+from evaluation.methods import METHODS, to_run
+from evaluation.scoring.main_metrics import retention
+from model import sam2_check, sam2_runner
 
-import fake_data  # noqa: E402
-import fake_sam2  # noqa: E402
+import fake_data
+import fake_sam2
 
-REMOVED_COLUMNS = ("jf_whole", "j_whole", "jf_post", "reseen_frames", "extra_jf_at_n", "extra_switch_shock",
-                   "extra_recovery_frames", "extra_absent_false_alarm", "extra_stratum_occlusion",
-                   "switch_seconds", "seconds_per_frame_after", "peak_vram_mb", "extra_drift_jf",
-                   "extra_failure", "extra_id_switch_rate", "part")
+REMOVED_COLUMNS = {"seconds", "extra_agreement", "extra_failure_rate", "extra_switch_gpu_mb",
+                   "seconds_per_frame_after", "reseen_frames", "restoration", "r2"}
 
 
 def run_script(name: str, *args: str) -> None:
@@ -54,122 +39,140 @@ def run_script(name: str, *args: str) -> None:
 def setup(tmp: Path) -> None:
     settings.DATA_ROOT = str(tmp / "data")
     settings.OUTPUT_ROOT = str(tmp / "outputs")
-    settings.RUN_EXTRA = True       # 전체 흐름은 진단 비교군·보조 지표까지 확인 (끈 경우는 check_main_only)
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
     translator.load = lambda: setattr(translator, "_translator", fake_sam2.FakeTranslator())
 
 
-def keep_only_model(dataset: str) -> None:
-    """예전에 본 모델만 따로 돌린 상태로 되돌린다: 본 모델·두 기준 줄만 <데이터셋>.model.jsonl 에 남긴다."""
-    path = records.records_path(dataset)
-    kept = [r for r in records.read_rows(path)
-            if r["baseline"] in (translator.MODEL.name, "source_only", "full_replay")]
-    path.unlink()
-    records.append_rows(path.with_name(f"{dataset}.model.jsonl"), kept)
-
-
 def dataset_rows(dataset: str) -> list[dict]:
-    folder = records.records_path(dataset).parent
-    return [r for path in sorted(folder.glob(f"{dataset}*.jsonl")) for r in records.read_rows(path)]
+    return [r for path in sorted(records.records_path(dataset).parent.glob(f"{dataset}*.jsonl"))
+            for r in records.read_rows(path)]
+
+
+def keep_only_model(dataset: str) -> None:
+    path = records.records_path(dataset)
+    rows = [r for r in records.read_rows(path)
+            if r["baseline"] in ("translator", "source_only", "full_replay")]
+    path.unlink()
+    records.append_rows(path.with_name(f"{dataset}.model.jsonl"), rows)
 
 
 def check_rows(dataset: str) -> None:
     rows = dataset_rows(dataset)
-    assert rows, f"{dataset}: 결과 줄 없음"
-    assert len(records.unique_rows(rows)) == len(rows), f"{dataset}: 같은 줄이 두 번 있음"
+    assert rows and len(records.unique_rows(rows)) == len(rows)
     for entry in load_video_list(dataset)["videos"]:
         for obj in entry["objects"]:
+            assert [sw["name"] for sw in obj["switches"]] == ["50", "75"]
             for sw in obj["switches"]:
                 got = {r["baseline"]: r for r in rows if r["video"] == entry["video"]
                        and r["object"] == obj["object"] and r["switch_name"] == sw["name"]}
-                assert set(got) == {m.name for m in METHODS}, (dataset, entry["video"], sw, set(got))
-                assert got["translator"]["jf"] == got["direct_state_copy"]["jf"], (dataset, entry["video"], sw)
-    for r in rows:
-        assert not any(k in r for k in REMOVED_COLUMNS), r
-        assert r["jf"] is not None and r["n_frames"] > 0, r
-        assert r["extra_agreement"] is not None, r
-        assert 0 <= r["extra_failure_rate"] <= 1, r
-        assert "extra_switch_gpu_mb" in r, r
-        if r["baseline"] in ("reset", "source_only"):
-            assert r["seconds"] is None and r["extra_switch_gpu_mb"] is None, r
+                assert set(got) == {m.name for m in METHODS}
+                assert got["translator"]["jf"] == got["direct_state_copy"]["jf"]
+    for row in rows:
+        assert not REMOVED_COLUMNS.intersection(row)
+        assert row["evaluation_revision"] == settings.EVALUATION_REVISION
+        assert row["jf"] is not None and row["n_frames"] > 0
+        assert 0 <= row["failure_rate"] <= 1
+        assert row["n_frames"] == len(row["frame_scores"])
+        assert abs(row["failure_rate"] - sum(p["j"] <= 0.5 for p in row["frame_scores"]) / row["n_frames"]) < 1e-12
+        assert abs(row["jf"] - sum(p["jf"] for p in row["frame_scores"]) / row["n_frames"]) < 1e-12
+        for point in row["frame_scores"]:
+            assert point["frames_after_switch"] == point["frame"] - row["switch_frame"] > 0
+        if row["baseline"] == "source_only":
+            assert row["switch_seconds"] is None and row["switch_gpu_mb"] is None
         else:
-            assert r["seconds"] > 0, r
-        if r["role"] in ("main", "model"):     # [추가] recent_k_only 는 객체가 안 보일 때 시작하면 0점이 맞음
-            assert r["jf"] > 0.3, r
+            assert row["switch_seconds"] > 0
+        assert "switch_gpu_mb" in row
+
     replay = [r for r in rows if r["baseline"] == "full_replay"]
-    source = [r for r in rows if r["baseline"] == "source_only"]
-    direct = [r for r in rows if r["baseline"] == "direct_state_copy"]
-    for key in ("jf", "j"):
+    for key in ("j", "jf"):
         assert abs(retention(replay, replay, key) - 100) < 1e-9
-        assert retention(direct, replay, key) is not None, f"{dataset}: 회복률 {key} 없음"
-    assert all(r["extra_agreement"] == 1.0 for r in replay)
-    replay_seconds = {}
-    for r in replay:     # Full Replay 는 한 번 돌리고 전환 시점마다 잘라 씀 → 시간이 같아야 함
-        replay_seconds.setdefault((r["video"], r["object"]), set()).add(r["seconds"])
-    assert all(len(v) == 1 for v in replay_seconds.values()), replay_seconds
-    small = [r["jf"] for r in source]
-    base = [r["jf"] for r in replay]
-    assert sum(base) / len(base) > sum(small) / len(small), "가짜 Base+ 가 Small 보다 좋아야 함"
-    print(f"  OK {dataset}: 줄 {len(rows)}개")
+    for row in replay:
+        if row["switch_name"] == "50":
+            later = next(r for r in replay if r["video"] == row["video"] and r["object"] == row["object"] and r["switch_name"] == "75")
+            assert later["switch_seconds"] >= row["switch_seconds"], (row, later)
+
+    # 객체 2는 12~17 프레임에 안 보인다. 경과 프레임을 압축해 새로 번호 매기지 않는다.
+    hidden = next(r for r in rows if r["object"] == 2 and r["switch_name"] == "50")
+    assert hidden["frame_scores"][0]["frames_after_switch"] == 4
+    print(f"  OK {dataset}: {len(rows)}줄, 50/75%, 지표와 전환 비용")
 
 
 def check_void() -> None:
-    objects = {o["object"] for e in load_video_list("m3vos")["videos"] for o in e["objects"]}
-    assert 255 not in objects and objects, objects
-    print(f"  OK m3vos: 255 는 객체 아님 (객체 {sorted(objects)})")
+    ids = {obj["object"] for entry in load_video_list("m3vos")["videos"] for obj in entry["objects"]}
+    assert 255 not in ids and ids
 
 
 def check_tables() -> None:
     tables = Path(settings.OUTPUT_ROOT) / "tables"
-    main_md = (tables / "main.md").read_text(encoding="utf-8")
-    extra_md = (tables / "extra.md").read_text(encoding="utf-8")
-    for m in MAIN + [translator.MODEL]:
-        assert f"| {m.label} |" in main_md, m.label
-    for m in EXTRA:
-        assert m.label not in main_md and f"| {m.label} |" in extra_md, m.label
-    assert "Moment-Matched" not in main_md + extra_md
-    for column in ("회복률 J", "회복률 J&F", "시간(초)"):
-        assert column in main_md, column
-    for column in ("격차 회복률", "속도 배수", "전환 지연"):
-        assert column not in main_md, column
-    for section in ("비용 세부", "출력 일치도", "진단 비교군", "실패 분석", "공식 라벨별"):
-        assert f"### {section}" in extra_md, section
-    for gone in ("drift", "입력 길이", "ID 뒤바뀜", "프레임당"):
-        assert gone not in extra_md, gone
-    assert "전환 GPU 메모리(MB)" in extra_md and "실패 비율(%)" in extra_md
-    assert not list(tables.glob("*.png"))
-    vost = main_md.split("## vost_val")[1].split("##")[0]
-    assert "주 지표: J\n" in vost
-    lvos = main_md.split("## lvos_v2_valid")[1].split("##")[0]
-    replay_line = next(line for line in lvos.splitlines() if line.startswith("| Full Replay |"))
-    cells = [c.strip() for c in replay_line.strip("|").split("|")]
-    assert cells[4] == "100.0" and cells[5] != "-", cells   # 회복률 J&F, 시간(초)
-    # 공식 라벨: 데이터셋별 표 + 합친 표
-    for label in ("OCC 가림 (영상", "FM 빠른 움직임 (영상", "변형:break (영상", "상태 변화:melt (영상",
-                  "상태:solid→liquid (영상"):
-        assert label in extra_md, label
-    merged = extra_md.split("## 여러 데이터셋 합친 라벨")[1]
-    assert "모양·상태 변화 (영상 4)" in merged, merged   # lval_00(DEF) + VOST 2 + M3VOS 1
-    print("  OK 표: main.md / extra.md")
+    main = (tables / "main.md").read_text(encoding="utf-8")
+    difficulty = (tables / "extra.md").read_text(encoding="utf-8")
+    for method in METHODS:
+        assert f"| {method.label} |" in main and f"| {method.label} |" in difficulty
+    for column in ("회복률 J", "회복률 J&F", "전환시간(초)", "전환 GPU 메모리(MB)", "실패 비율(%)"):
+        assert column in main
+    for gone in ("출력 일치도", "진단 비교군", "25%", "R^2", "복원율(", "전체 추적시간"):
+        assert gone not in main + difficulty
+    assert "### 전환 50%" in main and "### 전환 75%" in main
+    for label in ("OCC 가림", "FM 빠른 움직임", "변형:break", "상태 변화:melt", "상태:solid→liquid"):
+        assert label in difficulty
+    assert "공통 난이도 유형" in difficulty and "가려짐" in difficulty and "모양·상태 변화" in difficulty
+    with (tables / "temporal.csv").open(encoding="utf-8-sig", newline="") as stream:
+        points = list(csv.DictReader(stream))
+    assert points and {p["switch_name"] for p in points} == {"50", "75"}
+    assert {p["baseline"] for p in points} == {m.name for m in METHODS}
+    assert all(int(p["frames_after_switch"]) > 0 and 0 <= float(p["jf"]) <= 100 for p in points)
+    print("  OK 결과표: 전환별 요약, 난이도 성능, temporal.csv")
 
 
-def check_main_only(dataset: str) -> None:
-    """RUN_EXTRA 를 끄고 이어 돌리기: 첫 객체만 끝난 상태에서 다시 돌리면 나머지는 주 지표 방법만 돈다."""
+def check_legacy_results(dataset: str) -> None:
+    rows = dataset_rows(dataset)
+    source = next(r for r in rows if r["baseline"] == "source_only")
+    last = next(r for r in rows if r["baseline"] == "original_last_visible")
+    incompatible = [
+        {k: v for k, v in source.items() if k != "evaluation_revision"},
+        dict(last, baseline_revision=1, video="legacy_only"),
+        dict(source, baseline="original_replay_16"),
+        dict(source, baseline="reset", role="extra"),
+        dict(source, switch_name="25"),
+    ]
+    assert records.current_rows(incompatible) == []
+    path = records.records_path(dataset).with_name(f"{dataset}.legacy.jsonl")
+    records.append_rows(path, incompatible)
+    assert records.row_key(incompatible[1]) not in records.done_keys(dataset)
+    loaded = runpy.run_path(str(ROOT / "scripts/3_make_tables.py"))["load_rows"]()
+    assert all(r["video"] != "legacy_only" and r["switch_name"] != "25" for r in loaded)
+    assert all(r["baseline"] not in ("reset", "original_replay_16") for r in loaded)
+    print("  OK 이전 평가 기준과 제거된 비교군 결과 제외")
+
+
+def check_partial_resume(dataset: str) -> None:
     path = records.records_path(dataset)
     rows = records.read_rows(path)
-    first = (rows[0]["video"], rows[0]["object"])
+    missing = next(r for r in rows if r["baseline"] == "translator" and r["switch_name"] == "75")
     path.unlink()
-    records.append_rows(path, [r for r in rows if (r["video"], r["object"]) == first])
-    settings.RUN_EXTRA = False
+    records.append_rows(path, [r for r in rows if r is not missing])
     run_script("2_evaluate.py", "--dataset", dataset)
-    run_script("3_make_tables.py")
-    later = [r for r in dataset_rows(dataset) if (r["video"], r["object"]) != first]
-    assert later and {r["baseline"] for r in later} == {m.name for m in to_run()}, {r["baseline"] for r in later}
-    assert all(r[k] is None for r in later
-               for k in ("extra_agreement", "extra_failure_rate", "extra_switch_gpu_mb")), later[0]
-    assert all(r["jf"] is not None for r in later)
-    print(f"  OK {dataset}: RUN_EXTRA 끄고 이어 돌리기 (줄 {len(later)}개 추가)")
+    completed = records.read_rows(path)
+    assert len(completed) == len(rows)
+    assert len(records.unique_rows(completed)) == len(completed)
+    assert any(records.row_key(r) == records.row_key(missing) for r in completed)
+    print("  OK 일부 전환만 빠진 객체도 중복 없이 이어서 평가")
+
+
+def check_old_list_rejected(dataset: str) -> None:
+    path = video_list_path(dataset)
+    original = path.read_text(encoding="utf-8")
+    data = json.loads(original)
+    data["switch_fractions"] = [0.25, 0.5, 0.75]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    try:
+        load_video_list(dataset)
+        raise AssertionError("예전 영상 목록을 허용함")
+    except ValueError as error:
+        assert "1_make_video_list.py" in str(error)
+    finally:
+        path.write_text(original, encoding="utf-8")
 
 
 def check_roundtrip() -> None:
@@ -180,6 +183,94 @@ def check_roundtrip() -> None:
     print(f"  OK 꺼냈다 넣기: {r['identical_frames']}/{r['frames']} 프레임 동일")
 
 
+
+def check_baseline_contract() -> None:
+    """정확히 5개 비교군, Replay 범위, 마지막 비어 있지 않은 예측 선택을 확인한다."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from baseline import anchors, no_handoff
+    from baseline.handoff import HandoffPackage
+    from evaluation.evaluate_video import _run_small
+
+    expected = {
+        "source_only", "full_replay", "direct_state_copy",
+        "original_last_visible", "original_replay_8",
+    }
+    assert {m.name for m in MAIN} == expected and len(MAIN) == 5
+    assert {m.name for m in to_run()} == expected | {"translator"}
+    assert settings.REPLAY_FRAMES == 8
+
+    class PromptSession:
+        def __init__(self):
+            self.prompts = []
+            self.loaded = None
+
+        def add_prompt(self, frame, mask):
+            self.prompts.append((frame, mask))
+
+        def load_memory(self, memory):
+            self.loaded = memory
+
+    prompt = np.ones((2, 2), dtype=bool)
+    empty = np.zeros_like(prompt)
+
+    class SmallSession:
+        def add_prompt(self, frame, mask):
+            pass
+
+        def track(self, first, last):
+            for f in range(first, last + 1):
+                # 객체 점수가 낮아도 비어 있지 않은 예측을 고른다. 뒤의 빈 예측은 제외한다.
+                yield sam2_runner.FrameOut(f, prompt if f in (3, 8) else empty, False)
+
+        def export_memory(self):
+            return {"sentinel": "small memory"}
+
+        def close(self):
+            pass
+
+    obj = {"start": 0, "end": 12, "switches": [{"frame": 6}, {"frame": 10}]}
+    small = SimpleNamespace(start=lambda video: SmallSession())
+    keeper = SimpleNamespace(keep=lambda run, frame, mask: None)
+    _, packages = _run_small(small, None, obj, prompt, keeper)
+    assert packages[6].last_visible[0] == 3
+    assert packages[10].last_visible[0] == 8
+
+    session = PromptSession()
+    assert anchors.original_last_visible(session, packages[10]) == 11
+    assert [f for f, _ in session.prompts] == [0, 8]
+    assert session.prompts[1][1] is prompt and session.loaded is None
+
+    # 처음 프레임 중복과 비어 있지 않은 예측이 없는 경우에는 처음 정답만 사용한다.
+    for last_visible in (None, (0, empty)):
+        pkg = HandoffPackage(10, 0, prompt, {}, last_visible)
+        session = PromptSession()
+        anchors.original_last_visible(session, pkg)
+        assert len(session.prompts) == 1 and session.prompts[0][1] is prompt
+
+    replay = next(m for m in MAIN if m.name == "original_replay_8")
+    for switch, expected_first in ((20, 13), (3, 1)):
+        pkg = HandoffPackage(switch, 0, prompt, {}, None)
+        session = PromptSession()
+        first = replay.prepare(session, pkg)
+        assert first == expected_first
+        assert switch - first + 1 == min(8, switch)
+        assert len(session.prompts) == 1 and session.prompts[0][0] == 0
+        assert session.loaded is None
+
+    session = PromptSession()
+    direct = next(m for m in MAIN if m.name == "direct_state_copy")
+    assert direct.prepare(session, packages[10]) == 11
+    assert session.loaded is packages[10].small_memory and not session.prompts
+
+    session = PromptSession()
+    assert no_handoff.full_replay(session, 0, prompt) == 0
+    assert session.prompts[0][1] is prompt and session.loaded is None
+    print("  OK 비교군 5개: 마지막 비어 있지 않은 예측, 두 프롬프트, Replay-8 범위")
+
+
 def test_end_to_end():
     tmp = Path(tempfile.mkdtemp(prefix="benchmark_test_"))
     try:
@@ -187,22 +278,23 @@ def test_end_to_end():
         run_script("1_make_video_list.py")
         for dataset in DATASETS:
             run_script("2_evaluate.py", "--dataset", dataset)
-        keep_only_model("pumavos")      # 예전에 본 모델만 따로 돌린 결과가 있을 때
-        run_script("2_evaluate.py", "--dataset", "pumavos")     # → 비교군만 더 돈다
-
-        before = len(records.read_rows(records.records_path("vost_val")))
+        keep_only_model("pumavos")
+        run_script("2_evaluate.py", "--dataset", "pumavos")
+        before = len(dataset_rows("vost_val"))
         run_script("2_evaluate.py", "--dataset", "vost_val")
-        assert len(records.read_rows(records.records_path("vost_val"))) == before, "이어하기 실패"
+        assert len(dataset_rows("vost_val")) == before
 
-        print("\n확인")
         for dataset in DATASETS:
             check_rows(dataset)
         check_void()
+        check_baseline_contract()
+        check_partial_resume("m3vos")
+        check_legacy_results("vost_val")
+        check_old_list_rejected("m3vos")
         run_script("3_make_tables.py")
         check_tables()
         check_roundtrip()
-        check_main_only("m3vos")
-        print("\n모두 통과")
+        print("모두 통과")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -47,12 +47,29 @@ def read_rows(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def done_keys(dataset: str) -> set[tuple[str, int, str]]:
-    """이미 끝난 (영상, 객체, 방법). 이 데이터셋의 결과 파일을 모두 본다 (<데이터셋>*.jsonl)
-    → GPU 수를 바꾸거나 (--shard), 예전에 본 모델만 따로 돌린 결과가 있어도 끝난 것은 건너뛴다."""
+def row_key(row: dict) -> tuple:
+    """이어하기 키: 영상·객체·전환 이름·실제 전환 프레임·방법."""
+    return (row["video"], row["object"], row["switch_name"], row["switch_frame"], row["baseline"])
+
+
+def done_keys(dataset: str) -> set[tuple]:
+    """현재 정의로 끝난 결과 줄. 일부 전환만 완료된 방법도 나머지는 이어서 계산한다."""
     folder = records_path(dataset).parent
-    return {(r["video"], r["object"], r["baseline"])
-            for path in folder.glob(f"{dataset}*.jsonl") for r in read_rows(path)}
+    return {row_key(r) for path in folder.glob(f"{dataset}*.jsonl")
+            for r in current_rows(read_rows(path))}
+
+
+def current_rows(rows: list[dict]) -> list[dict]:
+    """현재 평가 버전, 전환 시점, 방법 실행 정의에 맞는 결과만 고른다."""
+    from evaluation.methods import METHODS
+
+    revisions = {m.name: m.revision for m in METHODS}
+    switches = {str(round(f * 100)) for f in settings.SWITCH_FRACTIONS}
+    return [r for r in rows
+            if r.get("evaluation_revision") == settings.EVALUATION_REVISION
+            and r["switch_name"] in switches
+            and r["baseline"] in revisions
+            and r.get("baseline_revision", 1) == revisions[r["baseline"]]]
 
 
 def unique_rows(rows: list[dict]) -> list[dict]:
@@ -60,7 +77,7 @@ def unique_rows(rows: list[dict]) -> list[dict]:
     예전에 본 모델·비교군을 따로 돌린 결과에는 Full Replay · Source-only 줄이 두 번 있을 수 있다."""
     seen, out = set(), []
     for r in rows:
-        key = (r["dataset"], r["video"], r["object"], r["switch_name"], r["baseline"])
+        key = (r["dataset"], *row_key(r))
         if key not in seen:
             seen.add(key)
             out.append(r)
