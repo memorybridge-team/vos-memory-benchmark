@@ -1,11 +1,16 @@
-"""회차별 Native 원점수와 전환 비용을 JSONL에 보존한다. 이어할 때 분모를 재실행하지 않는다."""
+"""회차별 Native 원점수·비용은 JSONL, 전환 시점 기억 기준은 CPU tensor 파일에 보존한다."""
 
+import os
+import re
 from pathlib import Path
 from uuid import uuid4
+
+import torch
 
 import settings
 from evaluation import cost, records
 from evaluation.scoring.jf import FrameScore
+from evaluation.scoring import restoration
 
 
 def reference_path(dataset, run_id, shard=None):
@@ -39,6 +44,7 @@ def pack(video, obj, run, run_id, seed):
     return {
         'evaluation_revision': settings.EVALUATION_REVISION,
         'native_reference_id': uuid4().hex,
+        'native_memory_revision': restoration.REVISION,
         'dataset': video.dataset, 'video': video.name, 'object': obj['object'],
         'start': obj['start'], 'end': obj['end'], 'switches': obj['switches'],
         'run_id': run_id, 'seed': seed,
@@ -50,3 +56,38 @@ def pack(video, obj, run, run_id, seed):
 
 def scores(ref):
     return {p['frame']: FrameScore(p['j'], p['f'], p['gt_visible']) for p in ref['scores']}
+
+
+def memory_path(ref):
+    identity = ref['native_reference_id']
+    if not isinstance(identity, str) or re.fullmatch(r'[0-9a-f]{32}', identity) is None:
+        raise ValueError('Native 기준 ID가 유효하지 않습니다.')
+    return Path(settings.OUTPUT_ROOT) / 'native_memory' / f'{identity}.pt'
+
+
+def save_memories(ref, snapshots):
+    """전환 시점 CPU 기억 snapshot을 원자적으로 저장한 뒤 Native JSONL을 쓰게 한다."""
+    path = memory_path(ref)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.pt.tmp')
+    payload = {'native_reference_id': ref['native_reference_id'],
+               'native_memory_revision': restoration.REVISION, 'snapshots': snapshots}
+    with temporary.open('wb') as stream:
+        torch.save(payload, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def load_memories(ref):
+    path = memory_path(ref)
+    if not path.exists():
+        raise ValueError(f'Native 기억 기준 파일이 없습니다: {path}. outputs/native_memory를 복구하세요.')
+    payload = torch.load(path, map_location='cpu', weights_only=True)
+    if (payload.get('native_reference_id') != ref['native_reference_id']
+            or payload.get('native_memory_revision') != restoration.REVISION):
+        raise ValueError(f'Native 기억 기준의 ID/버전이 다릅니다: {path}')
+    snapshots = payload['snapshots']
+    if set(snapshots) != {sw['frame'] for sw in ref['switches']}:
+        raise ValueError(f'Native 기억 기준의 전환 프레임이 다릅니다: {path}')
+    return snapshots

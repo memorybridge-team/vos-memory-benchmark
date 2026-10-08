@@ -1,5 +1,8 @@
 """전환 전후 전체 곡선. 시간점별 객체 → 영상 평균 후 회차 평균·표본 분산."""
 
+# TODO: 최종 논문 표현 방식은 미정. 실제 프레임/% 축, 곡선/분포 등을 R² 구현 후 재논의한다.
+# 현재 CSV는 중간 집계이며, 원본 프레임별 값으로 언제든 다시 표현할 수 있다.
+
 from collections import defaultdict
 
 from evaluation.methods import METHODS

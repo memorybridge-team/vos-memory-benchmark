@@ -17,7 +17,7 @@ from model.sam2_runner import FrameOut
 def _entry(color, mask: np.ndarray) -> dict:
     c = color if color is not None else (-1, -1, -1)
     return {
-        "maskmem_features": torch.full((1, 4, 2, 2), float(mask.mean())),
+        "maskmem_features": torch.arange(16, dtype=torch.float32).reshape(1, 4, 2, 2) / 100 + float(mask.mean()),
         "maskmem_pos_enc": [torch.zeros(1, 4, 2, 2)],
         "pred_masks": torch.from_numpy(mask.astype(np.float32))[None, None],
         "obj_ptr": torch.tensor([[*c, 1.0, 0.0]], dtype=torch.float32),
@@ -76,6 +76,11 @@ class FakeSession:
                 out[frame] = {**{k: (v.clone() if torch.is_tensor(v) else [x.clone() for x in v])
                                  for k, v in e.items()}, "is_cond": is_cond}
         return out
+
+    def export_features(self):
+        return {f: {k: v for k, v in entry.items()
+                    if k in ('maskmem_features', 'obj_ptr', 'is_cond')}
+                for f, entry in self.export_memory().items()}
 
     def memory_of(self, frame):
         return self.cond.get(frame) or self.non_cond.get(frame)

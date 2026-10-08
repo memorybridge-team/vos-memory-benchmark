@@ -189,6 +189,17 @@ class Session:
                     entries[frame] = entry
         return entries
 
+    def export_features(self) -> dict:
+        """복원율용 두 기억 필드만 CPU로 복사한다. 전환 비용 측정 밖에서 호출한다."""
+        entries = {}
+        with self._context():
+            for key, is_cond in (("cond_frame_outputs", True), ("non_cond_frame_outputs", False)):
+                for frame, out in self._store()[key].items():
+                    entries[frame] = {name: _copy_to(out.get(name), "cpu")
+                                      for name in ("maskmem_features", "obj_ptr")}
+                    entries[frame]["is_cond"] = is_cond
+        return entries
+
     def load_memory(self, entries: dict) -> None:
         """꺼낸 기억 칸을 이 세션에 넣는다. 넣은 뒤 track(전환 프레임 + 1, ...) 으로 이어간다.
 

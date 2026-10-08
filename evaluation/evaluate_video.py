@@ -21,12 +21,14 @@ import settings
 from evaluation import cost, native, repeats
 from baseline import no_handoff
 from baseline.handoff import HandoffPackage
-from evaluation.scoring import jf, main_metrics, recovery
+from evaluation.scoring import jf, main_metrics, recovery, restoration
 
 
 @dataclass
 class Run:
     """추적 한 번의 결과: 프레임별 점수·시간, GPU 메모리."""
+    feature_snapshots: dict = field(default_factory=dict)  # 전환 시점 Native CPU 기억
+    restoration: dict | None = None                     # 프레임별 계산만, 집계 없음
     scores: dict = field(default_factory=dict)     # 프레임 → FrameScore (정답 있는 프레임만)
     times: dict = field(default_factory=dict)      # 프레임 → 초 (Base+ 만)
     setup_seconds: float = 0.0
@@ -86,7 +88,8 @@ def _run_small(small, video, obj, prompt, keeper):
     return run, packages
 
 
-def _run_base(base, video, obj, prepare, keep_after, keeper):
+def _run_base(base, video, obj, prepare, keep_after, keeper,
+              snapshot_frames=(), restoration_reference=None):
     """새 Base+ 세션을 prepare 로 준비하고 끝까지 추적. keep_after 보다 뒤 프레임만 결과로 남긴다.
 
     GPU: 세션을 연 직후 사용량을 적고, 준비가 끝난 때(track_from − 1 칸)와 프레임마다
@@ -108,9 +111,17 @@ def _run_base(base, video, obj, prepare, keep_after, keeper):
             keeper.keep(run, f, empty)
     else:
         run.gpu_peaks[track_from - 1] = cost.gpu_peak_mb()
+        if restoration_reference is not None and track_from == keep_after + 1:
+            # 직접 복사/translator/anchor: s+1 추적이 시작되기 직전에 측정.
+            run.restoration = restoration.result(session.export_features(), restoration_reference, keep_after)
         for out, seconds in cost.timed(session.track(track_from, end)):
             run.times[out.frame] = seconds
             run.gpu_peaks[out.frame] = cost.gpu_peak_mb()
+            if out.frame in snapshot_frames:
+                run.feature_snapshots[out.frame] = session.export_features()
+            if restoration_reference is not None and out.frame == keep_after:
+                # Replay는 s까지 다시 처리한 뒤, s+1을 처리하기 전에 측정.
+                run.restoration = restoration.result(session.export_features(), restoration_reference, keep_after)
             if out.frame > keep_after:
                 keeper.keep(run, out.frame, out.mask)
     session.close()
@@ -156,12 +167,17 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
         repeats.seed_condition(seed, run_id, video.dataset, video.name, obj_id, "full_replay")
         replay_run = _run_base(base, video, obj,
                               lambda session: no_handoff.full_replay(session, start, prompt),
-                              keep_after=start - 1, keeper=keeper)
+                              keep_after=start - 1, keeper=keeper,
+                              snapshot_frames={sw["frame"] for sw in obj["switches"]})
         reference = native.pack(video, obj, replay_run, run_id, seed)
+        native_memories = replay_run.feature_snapshots
         if save_native is not None:
+            native.save_memories(reference, native_memories)
             save_native(reference)
     elif native.reference_key(reference) != native.case_key(video, obj, run_id, seed):
         raise ValueError("Native의 영상·객체·전환·회차·seed가 평가 조건과 다릅니다.")
+    if native_reference is not None:
+        native_memories = native.load_memories(reference)
     replay_run = Run(scores=native.scores(reference))
 
     repeats.seed_condition(seed, run_id, video.dataset, video.name, obj_id, "source_only")
@@ -181,9 +197,20 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
                                        f"{baseline.name}/{sw['name']}/{s}")
                 run = _run_base(base, video, obj,
                                 lambda session: baseline.prepare(session, pkg),
-                                keep_after=s, keeper=keeper)
+                                keep_after=s, keeper=keeper, restoration_reference=native_memories[s])
                 cost_info = cost.cost_columns(run, s)
             pre_run = replay_run if baseline.name == "full_replay" else small_run
-            rows.append(_row(video, obj, sw, baseline, run, cost_info,
-                             reference, pre_run, run_id, seed))
+            row = _row(video, obj, sw, baseline, run, cost_info,
+                       reference, pre_run, run_id, seed)
+            if baseline.name == "source_only":
+                row.update(restoration.not_applicable(s))
+            elif baseline.name == "full_replay":
+                row.update(restoration.result(native_memories[s], native_memories[s], s))
+            elif run.restoration is not None:
+                row.update(run.restoration)
+            else:
+                raise ValueError(f'전환 시점의 복원율 측정이 누락되었습니다: {baseline.name}, {s}')
+            # TODO: 복원율의 기억 칸/객체/영상/반복 집계와 최종 표현 방식은 추후 결정.
+            # 지금은 restoration_frame_scores의 칸별 R²/SSE/SST만 JSONL에 저장한다.
+            rows.append(row)
     return rows

@@ -4,7 +4,7 @@
 
 SAM2 Small이 객체를 추적하며 쌓은 기억을 SAM2 Base+로 넘긴 뒤의 성능과 전환 비용을 평가한다.
 현재 비교군 5개와 본 모델 1개를 함께 실행한다.
-J·J&F 회복률을 프레임별로 계산하며 전체 평가를 기본 3회 반복한다. 복원율(R²)은 아직 구현하지 않는다.
+J·J&F 회복률을 프레임별로 계산하며 전체 평가를 기본 3회 반복한다. 복원율(R²)은 전환 시점의 기억 프레임별로 계산·저장하며 최종 집계와 표현 방식은 미정이다.
 
 - 본 모델은 팀 translator 전달본의 선정 epoch 27을 사용한다.
 - 모델은 실행 전에 미리 로드한다. GPU가 여러 개여도 시간과 메모리 비교는 같은 종류의 GPU에서 한다.
@@ -129,6 +129,47 @@ Native 비교군의 전환 전 점수는 Native, 나머지 방법은 Small의 �
 Native 점수도 회차별 집계 후 평균·표준편차·분산을 동일하게 제공한다.
 회복률의 반복 표준편차는 계산된 Native 공통 기준에 대한 방법의 변동이다. Native 기준값의 추정 불확실성을 모두 반영하는 신뢰구간으로 해석하지 않는다.
 
+### R² 복원율: 기억 프레임별 계산만
+
+각 회차의 영상·객체·전환 s에서 Base+가 s+1을 처리하기 직전, 준비된 기억과 그 회차의 Native 기억을 비교한다.
+여기서 프레임별이란 전환 시점의 memory bank 안에 있는 기억 칸의 원래 프레임 번호이다.
+전환 이후 매 추적 프레임의 R² 곡선을 계산하는 것은 아니다.
+Native는 같은 첫 정답 프롬프트와 영상으로 처음부터 s까지 추적한 상태이다.
+J/J&F 회복률의 3회 중앙값과 별개로, 기억 R²의 기준은 같은 회차의 실제 Native tensor이다.
+
+기억 칸의 `maskmem_features`와 `obj_ptr`를 각각 펼쳐 계산한다.
+
+`R²(field, frame) = 1 − sum((prepared − native)²) / sum((native − mean(native))²)`.
+
+- 두 필드를 섞지 않고, Native를 기준값(y_true), 준비된 Target 기억을 비교값(y_pred)으로 둔다.
+- 비교 전 정확한 tensor shape를 확인한다. 계산은 CPU float64이고 입력 dtype/값은 바꾸지 않는다.
+- 1은 동일함, 0은 Native의 평균값으로 대체했을 때와 같은 오차이다. 음수도 유지하고 %로 바꾸지 않는다.
+- Native 분산이 0이면 동일한 tensor라도 R²은 N/A이다. 0이나 1로 대체하지 않는다.
+- 누락 칸/필드, 형상 불일치, 원소 수 부족, 비유한 값은 N/A와 사유를 저장한다.
+- 양쪽 memory bank의 프레임 합집합으로 대응하므로 누락된 기억도 기록한다. 0 tensor로 채우지 않는다.
+- 정답 가시성이나 J 실패를 이유로 기억 칸을 제외하지 않는다.
+- Native 기준은 자기 기억끼리 비교한다. Source-only에는 Target 기억이 없어 적용하지 않는다.
+- Direct State Copy/translator는 실제로 Base+에 넣고 준비한 기억을 비교한다.
+- Anchor/Replay도 준비된 Base+ 기억을 비교한다. 기억 칸 구성이 다르므로 공통 칸에서만 값이 있으며 누락 사유를 함께 봐야 한다.
+- 값에는 전환 전 Small의 누적 추적 오차가 포함될 수 있다. translator만의 변환 오차로 해석하지 않는다.
+
+결과 JSONL의 `restoration_frame_scores`에 기억 프레임, s에서 떨어진 프레임 수, cond 여부,
+필드별 `r2`, `sse`, `sst`, `native_mean`, `n_elements`, shape, status를 저장한다.
+회차·영상·객체·전환·방법·Native ID는 상위 결과 줄의 메타데이터를 사용한다.
+SSE/SST/평균/원소 수는 이후 칸 평균 또는 전체 tensor 기준으로 다시 집계할 때 사용할 수 있다.
+이 충분통계량만으로 임의의 새 특징 유사도 지표를 계산할 수 있는 것은 아니다.
+
+<!-- TODO: R²의 칸/객체/영상/회차 집계와 최종 표·그래프를 결정한다. 현재 대표 평균 R²이나 복원율 CSV/표를 만들지 않는다. -->
+
+R² 계산·통계용 CPU 기억 추출·파일 저장은 전환시간과 GPU peak 측정 밖에서 실행한다.
+Native는 50/75%에서 두 필드의 CPU 기억을 snapshot으로 꺼내 `outputs/native_memory/<native_reference_id>.pt`에 먼저 보존한다.
+이어하기에서는 이 파일을 재사용한다. 유실되면 Native를 다시 실행해 조용히 기준을 바꾸지 않고 오류를 낸다.
+`outputs/records`, `outputs/native`, `outputs/native_memory`를 함께 보존한다.
+Native tensor snapshot 때문에 CPU RAM과 디스크 사용량이 늘어난다. tensor dtype/기억 칸 수에 따라 달라지며,
+(1,64,64,64) BF16 feature 하나는 약 0.5 MiB이다. 같은 회차에 두 전환 snapshot을 저장한다.
+준비된 Target의 전체 tensor는 별도 파일로 저장하지 않고 프레임별 R² 및 충분통계량만 기록한다.
+버전 3 원점수에는 기억 snapshot이 없으므로 R²을 소급 계산할 수 없다. 기존 파일은 보존하며 버전 4 평가 결과와 섞지 않는다.
+
 ### 전환시간(초)
 
 `switch_seconds` = 준비 시간 + 전환 프레임 s까지의 replay 시간.
@@ -169,16 +210,17 @@ J_Recall = (J > 50인 대상 프레임 수) ÷ (대상 프레임 수).
 
 ## 결과 저장과 이어하기
 
-결과 버전은 `evaluation_revision = 3`이며 방법별 `baseline_revision`을 함께 저장한다.
+결과 버전은 `evaluation_revision = 4`이며 방법별 `baseline_revision`을 함께 저장한다.
 이전 결과는 삭제하지 않지만 새 회복률/반복 통계와 섞지 않는다.
 객체 기준 50/75% 영상 목록의 버전은 2로 유지하여 기존 목록을 재사용한다.
 Original + Last-Visible의 방법 버전은 2, 나머지는 1이다.
 
 - `outputs/records/<dataset>.run<r>[.shard<i>of<n>].jsonl`: 회차별 결과.
 - `outputs/native/<dataset>.run<r>[.shard<i>of<n>].jsonl`: 회차별 Native 기준 원점수와 전환 비용.
+- `outputs/native_memory/<native_reference_id>.pt`: 같은 Native 회차의 전환 시점 기억 기준(두 필드의 CPU tensor).
 - Native 기준은 생성 즉시 먼저 저장한다. 이어하기에서는 원래 기준을 재사용한다.
 - Native 파일이 유실되었는데 해당 회차 결과가 남아 있다면 새 분모를 섞지 않고 오류를 낸다.
-- 두 폴더를 함께 보존한다. 같은 조건을 여러 작업에 동시에 맡기지 않는다.
+- records/native/native_memory 세 폴더를 함께 보존한다. 같은 조건을 여러 작업에 동시에 맡기지 않는다.
 
 이어하기 키는 반복 번호·seed·영상·객체·전환 이름·실제 전환 프레임·방법이다.
 각 회차는 다른 회차의 완료 기록에 의해 건너뛰지 않는다. 일부 전환만 빠진 경우 누락된 줄만 추가한다.
@@ -187,6 +229,8 @@ Original + Last-Visible의 방법 버전은 2, 나머지는 1이다.
 기본 3회 실행: `python scripts/2_evaluate.py --dataset vost_val`.
 단일 회차: `--run-id 2`. 1회만 실행: `--runs 1`. 기준 seed: `--seed 0`.
 GPU 분할은 기존 `--shard i/n`을 사용한다.
+
+<!-- TODO: 최종 논문 표현 방식은 미정이다. 실제 상대 프레임/% 축 및 곡선/분포 구성은 R² 복원율 정의·구현 후 재논의한다. 원본 프레임별 값을 보존하며 현재 CSV/표는 중간 집계이다. -->
 
 ## 보고 파일
 
@@ -206,4 +250,4 @@ GPU 분할은 기존 `--shard i/n`을 사용한다.
 점수는 100점 척도, 회복률/실패비율은 %, 전환시간은 초, GPU 메모리는 MiB이다.
 
 실패 제외 분석은 원본을 변경하지 않고 별도 분석에서 적용한다. 방법마다 서로 다른 사례를 제외하여 비교하지 않는다.
-복원율, 출력 일치도, 전체 추적시간, 속도 배수 등 아직 요청되지 않은 지표는 추가하지 않는다.
+복원율의 칸/객체/영상/반복 요약값과 표·그래프는 아직 만들지 않는다. 출력 일치도, 전체 추적시간, 속도 배수 등 아직 요청되지 않은 지표는 추가하지 않는다.

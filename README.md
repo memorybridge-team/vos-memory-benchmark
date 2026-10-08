@@ -99,9 +99,13 @@ Native 반복 기준이 0이면 해당 회복률만 N/A이며 원점수와 실�
 낮은 성능과 빈 예측은 모든 회차에서 포함한다. 실행 오류는 점수 0으로 바꾸지 않고 중단 후 이어한다.
 전환 이전은 Small(또는 Native 비교군)의 원점수와 Native 원점수를 저장하고, 전환 이후 전체의 회복률 곡선을 보고한다.
 전환 축은 객체 최초 등장~영상 끝의 50%·75%이며, 경과 프레임 번호를 압축하지 않는다.
-복원율(R²)은 아직 구현하지 않는다.
+복원율(R²)은 전환 시점의 기억 프레임별로 `maskmem_features`와 `obj_ptr`를 각각 계산한다.
+같은 회차 Native와 비교한 R²·SSE·SST·Native 평균·원소 수·N/A 사유를 결과 JSONL의 `restoration_frame_scores`에 저장한다.
+Native 기억 기준은 `outputs/native_memory/<native_reference_id>.pt`에 보존하며 이어하기에 재사용한다.
+records/native/native_memory 세 폴더를 함께 보존한다. CPU RAM과 디스크 사용량은 늘어난다.
+복원율의 프레임/영상/반복 평균과 논문 표현은 미정이며 현재 집계하지 않는다. 자세한 정의는 docs/PROTOCOL.md를 참고한다.
 
-현재 결과 버전은 3이며 예전 결과 파일은 보존하되 새 집계에 섞지 않는다.
+현재 결과 버전은 4이며 예전 결과 파일은 보존하되 새 집계에 섞지 않는다.
 객체 기준 50%·75%로 만든 버전 2 영상 목록은 그대로 사용할 수 있다. 더 오래된 목록은 1_make_video_list.py로 다시 만든다.
 조건별 seed는 반복 번호와 영상·객체·방법으로 결정되어 분할/이어하기 순서에 영향을 받지 않는다.
 seed 변경이 추론 결과의 변동을 보장하지는 않는다. 동일한 결과가 반복되면 표준편차는 0이다.
@@ -132,5 +136,6 @@ Native 비교군의 실제 3회 점수를 중앙값 기준으로 나누어 집�
 ```bash
 python tests/test_metrics.py
 python tests/test_recovery.py
+python tests/test_restoration.py
 python tests/test_end_to_end.py
 ```

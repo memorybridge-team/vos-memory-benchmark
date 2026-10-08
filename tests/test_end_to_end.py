@@ -102,6 +102,20 @@ def check_rows(dataset: str) -> None:
         else:
             assert row["switch_seconds"] > 0
         assert "switch_gpu_mb" in row
+        assert row['restoration_revision'] == 1 and row['restoration_measured_at'] == row['switch_frame']
+        assert row['restoration_reference'] == 'native_same_run'
+        points = row['restoration_frame_scores']
+        if row['baseline'] == 'source_only':
+            assert not points and row['restoration_status'] == 'source_only_no_target_memory'
+        else:
+            assert points and row['restoration_status'] == 'measured'
+            assert all(p['frame'] <= row['switch_frame'] and p['frames_before_switch'] >= 0 for p in points)
+            assert any(p['maskmem_features']['r2'] is not None for p in points)
+            assert all(set(('maskmem_features', 'obj_ptr')).issubset(p) for p in points)
+        # 집계를 미리 결정하는 대표 scalar 지표를 추가하지 않는다.
+        assert 'r2_maskmem_features' not in row and 'r2_obj_ptr' not in row
+        if row['baseline'] == 'full_replay':
+            assert all(p[field]['r2'] == 1 for p in points for field in ('maskmem_features', 'obj_ptr'))
 
     replay = [r for r in rows if r["baseline"] == "full_replay"]
     for row in replay:
@@ -109,6 +123,11 @@ def check_rows(dataset: str) -> None:
     refs = native.load_references(dataset)
     objects = sum(len(v['objects']) for v in load_video_list(dataset)['videos'])
     assert len(refs) == objects * 3
+    for ref in refs.values():
+        memories = native.load_memories(ref)
+        assert set(memories) == {sw['frame'] for sw in ref['switches']}
+        assert all(set(entry) == {'maskmem_features', 'obj_ptr', 'is_cond'}
+                   for snapshot in memories.values() for entry in snapshot.values())
     assert len(rows) == objects * 3 * 2 * len(METHODS)
     assert all(len({r['native_reference_id'] for r in rows if r['run_id'] == ref['run_id']
                     and r['video'] == ref['video'] and r['object'] == ref['object']}) == 1
@@ -219,6 +238,7 @@ def check_partial_resume(dataset):
     assert restored['native_reference_id'] == missing['native_reference_id']
     assert restored['frame_scores'] == missing['frame_scores']
     assert restored['recovery_j'] == missing['recovery_j']
+    assert restored['restoration_frame_scores'] == missing['restoration_frame_scores']
     print('  OK 회차별 일부 전환 이어하기, Native 기준 재실행 없이 유지')
 
 def check_old_list_rejected(dataset: str) -> None:
