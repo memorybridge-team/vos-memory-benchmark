@@ -2,7 +2,8 @@
 
 maskmem_features와 obj_ptr를 각각 펼쳐 R² = 1 - SSE / SST를 구한다.
 회복률의 Native 반복 중앙값과 별개로, 복원율은 같은 회차의 실제 Native tensor를 쓴다.
-TODO: 칸/객체/영상/회차 평균과 논문 표·그래프의 표현 방식은 미정. 현재 집계하지 않는다.
+대표값은 준비된 Target 기억 전체의 필드별 R²이다. 칸별 R² 단순 평균과 구분한다.
+칸별 원점수는 보존하며 영상/회차 집계는 tables/summaries.py에서 수행한다.
 """
 
 import math
@@ -78,3 +79,56 @@ def not_applicable(switch_frame):
     return {'restoration_revision': REVISION, 'restoration_reference': 'native_same_run',
             'restoration_measured_at': switch_frame, 'restoration_status': 'source_only_no_target_memory',
             'restoration_frame_scores': []}
+
+
+def bank_score(points, field):
+    """준비된 Target의 전체 기억 원소를 이어 붙인 R²을 충분통계량으로 재계산한다.
+
+    Native에만 있는 칸은 Target에 전달되지 않았으므로 대표값의 대상이 아니다.
+    Target 칸 하나라도 대응 Native/필드가 없으면 전체 점수는 N/A이다.
+    """
+    selected = [p[field] for p in points if p.get('target_is_cond') is not None]
+    count, center, sst, sse, compared = 0, 0., 0., 0., 0
+    for part in selected:
+        n = part.get('n_elements', 0)
+        if not n or any(part.get(k) is None for k in ('sse', 'sst', 'native_mean')):
+            continue
+        delta = part['native_mean'] - center
+        total = count + n
+        # 칸별 Native 평균이 다르면 평균 사이의 변동도 전체 SST에 포함한다.
+        sst += part['sst'] + delta ** 2 * count * n / total
+        center += delta * n / total
+        count = total
+        sse += part['sse']
+        compared += 1
+    complete = bool(selected) and compared == len(selected)
+    finite = all(math.isfinite(v) for v in (center, sst, sse))
+    r2 = 1 - sse / sst if complete and finite and count >= 2 and sst > 0 else None
+    if r2 is not None and not math.isfinite(r2):
+        r2 = None
+        finite = False
+    status = ('empty_target_memory' if not selected else 'incomplete_memory' if not complete
+              else 'nonfinite_statistics' if not finite else 'insufficient_elements' if count < 2
+              else 'zero_native_variance' if sst == 0 else 'ok')
+    return {'r2': r2, 'status': status, 'sse': sse if finite else None,
+            'sst': sst if finite else None, 'native_mean': center if count and finite else None,
+            'n_elements': count, 'target_frame_count': len(selected), 'compared_frame_count': compared,
+            'missing_or_invalid_frame_count': len(selected) - compared,
+            'native_only_frame_count': len(points) - len(selected)}
+
+
+def recompute(rows):
+    """저장된 충분통계량으로 대표값을 만든다. 원본 줄/기억 프레임 값은 바꾸지 않는다."""
+    out = []
+    for row in rows:
+        result = dict(row)
+        result['restoration_statistic'] = 'full_prepared_memory'
+        result['restoration_summary'] = {}
+        for field in FIELDS:
+            summary = bank_score(row.get('restoration_frame_scores', []), field)
+            if row.get('restoration_status') == 'source_only_no_target_memory':
+                summary['status'] = 'source_only_no_target_memory'
+            result[f'r2_{field}'] = summary['r2']
+            result['restoration_summary'][field] = summary
+        out.append(result)
+    return out

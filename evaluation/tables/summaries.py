@@ -1,6 +1,7 @@
 """동일 사례를 회차마다 집계한 뒤 반복 평균·표본 분산(ddof=1)을 구한다.
 
-회차별: 프레임 평균(결과 줄) → 객체 평균 → 영상 평균.
+회차별: 객체별 결과 줄의 점수 → 영상 내 객체 평균 → 영상 평균.
+복원율의 객체 점수는 전체 준비 기억 R²이고 프레임별 R² 평균은 아니다.
 미완료/분모 0로 값이 빠진 경우 회차 간 공통 유효 사례만 사용하고 수를 보고한다.
 회차별 표준편차를 평균하거나 서로 다른 영상의 점수를 반복 표본으로 세지 않는다.
 """
@@ -10,8 +11,19 @@ from statistics import variance
 
 from evaluation.scoring.main_metrics import mean
 
-METRICS = {'j': 100, 'jf': 100, 'recovery_j': 1, 'recovery_jf': 1,
+METRICS = {'j': 100, 'jf': 100, 'pre_recovery_j': 1, 'pre_recovery_jf': 1,
+           'post_recovery_j': 1, 'post_recovery_jf': 1,
+           'r2_maskmem_features': 1, 'r2_obj_ptr': 1,
            'failure_rate': 100, 'switch_seconds': 1, 'switch_gpu_mb': 1}
+SUPPORT_METRICS = ('pre_recovery_j', 'pre_recovery_jf', 'post_recovery_j', 'post_recovery_jf',
+                   'r2_maskmem_features', 'r2_obj_ptr')
+RECOVERY_COUNT_FIELDS = [
+    f'{phase}_{key}' for phase in ('pre', 'post')
+    for key in ([f'recovery_{m}_{suffix}' for m in ('j', 'jf')
+                 for suffix in ('n_frames', 'defined_frame_count')]
+                + [f'{kind}_native_{m}_n_frames' for kind in ('zero', 'missing') for m in ('j', 'jf')]
+                + ['pending_native_n_frames'])
+]
 
 
 def distribution(values):
@@ -56,9 +68,9 @@ def format_stats(rows, metric, scale=1, digits=1):
 
 
 GROUP_FIELDS = ['dataset', 'switch_name', 'baseline']
-SUMMARY_FIELDS = GROUP_FIELDS + [f'{m}_{s}' for m in METRICS for s in ('mean', 'std', 'variance', 'run_count')] + ['video_count', 'object_count', 'recovery_j_video_count', 'recovery_j_object_count', 'recovery_jf_video_count', 'recovery_jf_object_count']
+SUMMARY_FIELDS = GROUP_FIELDS + [f'{m}_{s}' for m in METRICS for s in ('mean', 'std', 'variance', 'run_count')] + ['video_count', 'object_count'] + [f'{m}_{count}' for m in SUPPORT_METRICS for count in ('video_count', 'object_count')]
 PER_RUN_FIELDS = GROUP_FIELDS + ['run_id'] + list(METRICS) + ['video_count', 'object_count']
-PER_VIDEO_FIELDS = GROUP_FIELDS + ['run_id', 'video'] + list(METRICS) + ['object_count', 'n_frames', 'recovery_j_n_frames', 'recovery_jf_n_frames', 'zero_native_j_n_frames', 'zero_native_jf_n_frames', 'pending_native_n_frames']
+PER_VIDEO_FIELDS = GROUP_FIELDS + ['run_id', 'video'] + list(METRICS) + ['object_count', 'n_frames', 'recovery_j_n_frames', 'recovery_jf_n_frames', 'zero_native_j_n_frames', 'zero_native_jf_n_frames', 'pending_native_n_frames'] + RECOVERY_COUNT_FIELDS + [f'{m}_object_count' for m in ('r2_maskmem_features', 'r2_obj_ptr')]
 
 
 def build(rows):
@@ -74,7 +86,7 @@ def build(rows):
             for name in ('mean', 'std', 'variance', 'run_count'):
                 summary[f'{metric}_{name}'] = stats[name]
         summary.update(video_count=all_stats['j']['video_count'], object_count=all_stats['j']['object_count'])
-        for m in ('recovery_j', 'recovery_jf'):
+        for m in SUPPORT_METRICS:
             summary[f'{m}_video_count'] = all_stats[m]['video_count']
             summary[f'{m}_object_count'] = all_stats[m]['object_count']
         summaries.append(summary)
@@ -90,7 +102,9 @@ def build(rows):
             for metric, scale in METRICS.items():
                 value = mean(r.get(metric) for r in objects)
                 out[metric] = value * scale if value is not None else None
-            for count in ('n_frames', 'recovery_j_n_frames', 'recovery_jf_n_frames', 'zero_native_j_n_frames', 'zero_native_jf_n_frames', 'pending_native_n_frames'):
+            for metric in ('r2_maskmem_features', 'r2_obj_ptr'):
+                out[f'{metric}_object_count'] = sum(r.get(metric) is not None for r in objects)
+            for count in ('n_frames', 'recovery_j_n_frames', 'recovery_jf_n_frames', 'zero_native_j_n_frames', 'zero_native_jf_n_frames', 'pending_native_n_frames', *RECOVERY_COUNT_FIELDS):
                 out[count] = sum(r.get(count, 0) for r in objects)
             per_videos.append(out)
     return summaries, per_runs, per_videos

@@ -65,6 +65,43 @@ def test_memory_frames():
     assert not any(k.startswith('r2_') for k in got), '집계 결과는 아직 만들지 않는다'
 
 
+def test_bank_summary():
+    import json
+    y1, y2 = torch.tensor([1., 2., 3.]), torch.tensor([10., 10., 10.])
+    p1, p2 = torch.tensor([1., 2., 2.]), torch.tensor([11., 11., 11.])
+
+    def entry(values):
+        return {'maskmem_features': values, 'obj_ptr': values, 'is_cond': False}
+
+    native = {1: entry(y1), 2: entry(y2), 0: entry(torch.tensor([100., 101., 102.]))}
+    prepared = {1: entry(p1), 2: entry(p2)}
+    raw = restoration.result(prepared, native, 3)
+    before = json.dumps(raw, sort_keys=True)
+    row = restoration.recompute([raw])[0]
+    assert json.dumps(raw, sort_keys=True) == before
+    expected = restoration.tensor_score(torch.cat([y1, y2]), torch.cat([p1, p2]))
+    close(row['r2_maskmem_features'], expected['r2'])
+    close(row['r2_obj_ptr'], expected['r2'])
+    close(row['restoration_summary']['maskmem_features']['sst'], expected['sst'])
+    assert abs(row['r2_maskmem_features'] - .5) > .1, '칸별 R² 단순 평균과 달라야 한다'
+    stats = row['restoration_summary']['maskmem_features']
+    assert stats['target_frame_count'] == stats['compared_frame_count'] == 2
+    assert stats['native_only_frame_count'] == 1
+    # 같은 충분통계량으로 반복 집계해도 값이 달라지지 않는다.
+    assert restoration.recompute([row])[0] == row
+    # 일부 Target 칸의 Native를 얻지 못한 경우 유리한 칸만 골라 대표값을 만들지 않는다.
+    missing = restoration.result(prepared, {1: native[1]}, 3)
+    scored = restoration.recompute([missing])[0]
+    assert scored['r2_obj_ptr'] is None
+    assert scored['restoration_summary']['obj_ptr']['status'] == 'incomplete_memory'
+    # 칸 각각의 분산은 0이어도 전체 기억의 분산은 양수일 수 있다.
+    varied = {1: entry(torch.ones(2)), 2: entry(torch.full((2,), 3.))}
+    close(restoration.recompute([restoration.result(varied, varied, 3)])[0]['r2_obj_ptr'], 1)
+    source = restoration.recompute([restoration.not_applicable(3)])[0]
+    assert source['r2_obj_ptr'] is None
+    assert source['restoration_summary']['obj_ptr']['status'] == 'source_only_no_target_memory'
+
+
 def test_timing():
     clock = {'seconds': 0., 'gpu': 100., 'features_at': []}
     y = torch.tensor([1., 2., 3.])
@@ -125,5 +162,6 @@ def test_timing():
 if __name__ == '__main__':
     test_math()
     test_memory_frames()
+    test_bank_summary()
     test_timing()
     print('OK: 프레임별 R², 음수/상수/누락, 전환 시점 측정과 비용 제외')

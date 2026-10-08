@@ -25,13 +25,18 @@ def group_tables(rows: list[dict], groups: list[str], groups_of_row) -> str:
                     format_stats(mine, "j", 100),
                     format_stats(mine, "jf", 100),
                     format_stats(mine, "failure_rate", 100),
-                    format_stats(mine, "recovery_j"),
-                    format_stats(mine, "recovery_jf"),
+                    format_stats(mine, "pre_recovery_j"),
+                    format_stats(mine, "pre_recovery_jf"),
+                    format_stats(mine, "post_recovery_j"),
+                    format_stats(mine, "post_recovery_jf"),
+                    format_stats(mine, "r2_maskmem_features", digits=3),
+                    format_stats(mine, "r2_obj_ptr", digits=3),
                     str(metric_stats(mine, "j")["video_count"]),
                     str(metric_stats(mine, "j")["run_count"]),
+                    f"{metric_stats(mine, 'r2_maskmem_features')['object_count']}/{metric_stats(mine, 'r2_obj_ptr')['object_count']}",
                 ])
         parts += [f"#### {group}", "",
-                  markdown(["방법", "J", "J&F", "실패 비율(%)", "회복률 J", "회복률 J&F", "영상 수", "회차 수"], lines), ""]
+                  markdown(["방법", "J", "J&F", "실패 비율(%)", "전환 전 회복률 J", "전환 전 회복률 J&F", "전환 후 회복률 J", "전환 후 회복률 J&F", "복원율 R² (spatial)", "복원율 R² (pointer)", "영상 수", "회차 수", "R² 유효 객체 spatial/pointer"], lines), ""]
     return "\n".join(parts)
 
 
@@ -51,7 +56,9 @@ def build(groups: dict, object_labels: dict) -> list[str]:
         return object_labels.get((row["dataset"], row["video"], row["object"]), [])
 
     out = ["# 난이도 유형별 성능\n",
-           "영상·객체 전체의 라벨 기준이며 전환 뒤에 해당 사건이 발생했는지는 구분하지 않는다.\n"]
+           "영상·객체 전체의 라벨 기준이며 전환 뒤에 해당 사건이 발생했는지는 구분하지 않는다.",
+           "전환 전/후 회복률은 객체별 구간 평균 점수 / 같은 프레임 Native 기준 평균 × 100이다.",
+           "전환 전 Small 예측은 방법 간 공통이며, Native 행은 자체 예측이다.\n"]
     for dataset, rows in groups.items():
         out += [f"## {dataset} 공식 라벨\n"] + switch_sections(rows, raw_labels)
 

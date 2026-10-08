@@ -1,7 +1,8 @@
 """J·J&F 회복률: 영상·객체·프레임별 Native 반복 중앙값을 공통 분모로 사용.
 
-분모 0 또는 누락은 None. 음수/100 초과를 자르거나 작은 상수를 더하지 않는다.
-구간 요약은 프레임별 비율의 평균이며, 원점수 평균끼리 나누지 않는다.
+프레임별 또는 구간 평균 분모가 0/누락이면 None. 100% 초과를 자르거나 작은 상수를 더하지 않는다.
+전환 전/후 구간 요약은 같은 평가 프레임들의 원점수 평균 / Native 기준 평균이다.
+프레임별 비율도 따로 보존하며, 구간 분모 평균이 0이면 None이다.
 """
 
 from collections import defaultdict
@@ -21,18 +22,40 @@ def point(frame, score, native, switch_frame, post=True):
     return {'frame': frame, 'frames_after_switch': frame - switch_frame,
             'j': score.j, 'f': score.f, 'jf': score.jf,
             'native_j': native_j, 'native_jf': native_jf,
-            'recovery_j': ratio(score.j, native_j) if post else None,
-            'recovery_jf': ratio(score.jf, native_jf) if post else None}
+            'recovery_j': ratio(score.j, native_j),
+            'recovery_jf': ratio(score.jf, native_jf)}
 
 
 def columns(points):
+    """구간 평균의 비율. 분자와 분모에 같은 프레임 집합을 사용한다.
+
+    Native=0인 개별 프레임도 평균에 포함한다. 해당 프레임의 비율은 N/A여도
+    구간 Native 평균이 양수면 구간 회복률은 계산할 수 있다.
+    Native 기준이 미완료/누락된 프레임은 양쪽 평균에서 제외하고 수를 보존한다.
+    """
     result = {}
     for metric in ('j', 'jf'):
         key = f'recovery_{metric}'
-        result[key] = mean(p[key] for p in points)
-        result[f'{key}_n_frames'] = sum(p[key] is not None for p in points)
-        result[f'zero_native_{metric}_n_frames'] = sum(p[f'native_{metric}'] == 0 for p in points)
-        result[f'missing_native_{metric}_n_frames'] = sum(p[f'native_{metric}'] is None for p in points)
+        paired = [p for p in points if p.get(metric) is not None
+                  and p.get(f'native_{metric}') is not None]
+        method_mean = mean(p[metric] for p in paired)
+        native_mean = mean(p[f'native_{metric}'] for p in paired)
+        result[key] = ratio(method_mean, native_mean)
+        result[f'{key}_method_mean'] = method_mean
+        result[f'{key}_native_mean'] = native_mean
+        result[f'{key}_n_frames'] = len(paired)
+        result[f'{key}_defined_frame_count'] = sum(p.get(key) is not None for p in points)
+        result[f'zero_native_{metric}_n_frames'] = sum(p.get(f'native_{metric}') == 0 for p in points)
+        result[f'missing_native_{metric}_n_frames'] = sum(p.get(f'native_{metric}') is None for p in points)
+    return result
+
+
+def phase_columns(points, phase):
+    if phase not in ('pre', 'post'):
+        raise ValueError('회복률 구간은 pre 또는 post여야 합니다.')
+    result = {f'{phase}_{key}': value for key, value in columns(points).items()}
+    result[f'{phase}_pending_native_n_frames'] = sum(
+        not p.get('native_reference_ready', False) for p in points)
     return result
 
 
@@ -119,7 +142,8 @@ def recompute(rows, run_ids=None, statistic='median'):
     out = []
     for row in rows:
         result = dict(row)
-        result.update(recovery_reference=f'native_{statistic}', recovery_reference_runs=list(run_ids))
+        result.update(recovery_reference=f'native_{statistic}', recovery_reference_runs=list(run_ids),
+                      recovery_statistic='ratio_of_means')
         for field in ('frame_scores', 'pre_switch_frame_scores'):
             points = []
             for original in row.get(field, []):
@@ -131,11 +155,14 @@ def recompute(rows, run_ids=None, statistic='median'):
                          native_reference_count=ref['native_reference_count'],
                          native_reference_ready=ref['native_reference_ready'])
                 for metric in ('j', 'jf'):
-                    p[f'recovery_{metric}'] = ratio(p[metric], p[f'native_{metric}']) if field == 'frame_scores' else None
+                    p[f'recovery_{metric}'] = ratio(p[metric], p[f'native_{metric}'])
                 points.append(p)
             result[field] = points
+        result.update(phase_columns(result['pre_switch_frame_scores'], 'pre'))
+        result.update(phase_columns(result['frame_scores'], 'post'))
+        # 이전 API의 recovery_j/recovery_jf는 전환 후 구간 요약의 별칭이다.
         result.update(columns(result['frame_scores']))
-        result['pending_native_n_frames'] = sum(not p['native_reference_ready'] for p in result['frame_scores'])
+        result['pending_native_n_frames'] = result['post_pending_native_n_frames']
         out.append(result)
     return out
 

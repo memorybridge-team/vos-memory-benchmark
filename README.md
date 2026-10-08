@@ -81,7 +81,9 @@ Native와 Source-only는 회차마다 객체당 한 번씩 실행하고, 같은 
 Native 원점수와 전환 비용은 `outputs/native/<데이터셋>.run1[.shard0of2].jsonl`에 먼저 저장한다.
 이 파일을 이어하기에서도 재사용하므로 회차별 Native 원점수가 바뀌지 않는다. `outputs/records`와 `outputs/native`를 함께 보존한다.
 
-J 회복률과 J&F 회복률은 같은 영상·객체·프레임의 방법 점수 / Native 반복 중앙값 × 100이다.
+프레임별 J·J&F 회복률은 같은 영상·객체·프레임의 방법 점수 / Native 반복 중앙값 × 100이다.
+표에는 전환 전·후 각각의 구간 평균 점수 / 같은 프레임의 Native 기준 평균 × 100을 네 열로 표시한다. 프레임별 비율 평균과는 다르다. 전환 전은 객체 최초 등장~s, 전환 후는 s+1~끝이다.
+Native를 제외한 방법의 전환 전 점수는 공통 Small 예측이며, Native 행은 자체 예측을 사용한다.
 J의 중앙값과 J&F의 중앙값을 별도로 구한다. J&F의 기준은 각 회차의 (J+F)/2를 구한 뒤 그 값들의 중앙값이다.
 추론 JSONL에는 원점수와 `recovery_reference=pending`을 저장한다. 회복률은 3회 Native가 모인 뒤 3_make_tables.py에서 계산한다.
 Native=80,80,0이면 중앙값80을 모든 방법·회차에 공유하며 실패0도 중앙값 표본에서 삭제하지 않는다.
@@ -92,10 +94,10 @@ python scripts/3_make_tables.py --native-statistic median  # 기본값
 python scripts/3_make_tables.py --native-statistic mean
 ```
 
-원본 records/native는 변경하지 않는다. 정의별 회복률 JSONL은 `outputs/analysis/recovery.seed0.runs3.median.jsonl` 또는 `.mean.jsonl`에 별도 저장한다.
+원본 records/native는 변경하지 않는다. 정의별 회복률 JSONL은 `outputs/analysis/recovery.seed0.runs3.median.ratio_of_means.jsonl` 또는 `.mean.ratio_of_means.jsonl`에 별도 저장한다.
 `outputs/tables`의 CSV/Markdown은 마지막 집계 결과로 갱신된다.
-프레임별 비율 평균 → 객체 평균 → 영상 평균으로 회차 점수를 만든 뒤, 반복 평균·표본 표준편차(ddof=1)·분산을 보고한다.
-Native 반복 기준이 0이면 해당 회복률만 N/A이며 원점수와 실패비율은 유지한다. 100%를 넘는 회복률도 그대로 저장한다.
+객체별 전환 전/후 구간 평균의 비율 → 영상 내 객체 평균 → 영상 평균으로 회차 점수를 만든 뒤, 반복 평균·표본 표준편차(ddof=1)·분산을 보고한다.
+Native 반복 기준이 0인 프레임도 구간 평균에 포함한다. 구간 Native 평균이 0이면 구간 회복률만 N/A이며 원점수와 실패비율은 유지한다. 누락/미완료 Native 프레임은 분자·분모에서 함께 제외하고 개수를 저장한다. 100%를 넘는 회복률도 그대로 저장한다.
 낮은 성능과 빈 예측은 모든 회차에서 포함한다. 실행 오류는 점수 0으로 바꾸지 않고 중단 후 이어한다.
 전환 이전은 Small(또는 Native 비교군)의 원점수와 Native 원점수를 저장하고, 전환 이후 전체의 회복률 곡선을 보고한다.
 전환 축은 객체 최초 등장~영상 끝의 50%·75%이며, 경과 프레임 번호를 압축하지 않는다.
@@ -103,7 +105,9 @@ Native 반복 기준이 0이면 해당 회복률만 N/A이며 원점수와 실�
 같은 회차 Native와 비교한 R²·SSE·SST·Native 평균·원소 수·N/A 사유를 결과 JSONL의 `restoration_frame_scores`에 저장한다.
 Native 기억 기준은 `outputs/native_memory/<native_reference_id>.pt`에 보존하며 이어하기에 재사용한다.
 records/native/native_memory 세 폴더를 함께 보존한다. CPU RAM과 디스크 사용량은 늘어난다.
-복원율의 프레임/영상/반복 평균과 논문 표현은 미정이며 현재 집계하지 않는다. 자세한 정의는 docs/PROTOCOL.md를 참고한다.
+복원율은 준비된 Target 전체 기억 원소의 R²을 재계산한 뒤 객체→영상→회차 순서로 평균한다.
+기존 표에 spatial/pointer 두 R² 열을 평균 ± 반복 표준편차로 보고한다. 칸별 R²의 단순 평균은 아니다.
+프레임별 충분통계량은 그대로 보존하므로 재추론 없이 집계하며, 복원율은 원래 R² 척도로 표시한다. 자세한 정의는 docs/PROTOCOL.md를 참고한다.
 
 현재 결과 버전은 4이며 예전 결과 파일은 보존하되 새 집계에 섞지 않는다.
 객체 기준 50%·75%로 만든 버전 2 영상 목록은 그대로 사용할 수 있다. 더 오래된 목록은 1_make_video_list.py로 다시 만든다.
@@ -115,8 +119,8 @@ seed 변경이 추론 결과의 변동을 보장하지는 않는다. 동일한 �
 
 - `outputs/tables/main.md`: 50/75%별 반복 평균 ± 표준편차.
 - `outputs/tables/extra.md`: 공식 난이도 유형별 반복 통계.
-- `outputs/tables/temporal.csv`: 전환 전후 전체의 J·J&F·Native와 전환 후 두 회복률 곡선, 반복 분산과 유효 표본 수.
-- `outputs/tables/per_video.csv`: 회차별 영상 점수·회복률과 0분모/기준 미완료 프레임 수.
+- `outputs/tables/temporal.csv`: 전환 전후 전체의 J·J&F·Native와 프레임별 두 회복률 곡선, 반복 분산과 유효 표본 수.
+- `outputs/tables/per_video.csv`: 회차별 영상 점수·전환 전/후 회복률과 구간별 평가/0분모/기준 미완료 프레임 수.
 - `outputs/tables/native_reference.csv`: 영상·객체·프레임별 Native 원점수 분포의 평균·중앙값·표준편차·분산·J실패 횟수. 값은 원점수 척도(0~1).
 - `outputs/tables/per_run.csv`: 회차별 데이터셋 대표 점수.
 - `outputs/tables/summary.csv`: 데이터셋·전환·방법별 평균·표준편차·분산·회차 수.

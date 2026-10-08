@@ -28,7 +28,7 @@ from evaluation.scoring import jf, main_metrics, recovery, restoration
 class Run:
     """추적 한 번의 결과: 프레임별 점수·시간, GPU 메모리."""
     feature_snapshots: dict = field(default_factory=dict)  # 전환 시점 Native CPU 기억
-    restoration: dict | None = None                     # 프레임별 계산만, 집계 없음
+    restoration: dict | None = None                     # 추론 단계의 프레임별 계산값
     scores: dict = field(default_factory=dict)     # 프레임 → FrameScore (정답 있는 프레임만)
     times: dict = field(default_factory=dict)      # 프레임 → 초 (Base+ 만)
     setup_seconds: float = 0.0
@@ -148,6 +148,9 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
     row["pre_switch_frame_scores"] = [
         recovery.raw_point(f, sc, reference_scores.get(f), s)
         for f, sc in sorted(pre_run.scores.items()) if f <= s and sc.gt_visible]
+    row.update(recovery.phase_columns(row['pre_switch_frame_scores'], 'pre'))
+    row.update(recovery.phase_columns(row['frame_scores'], 'post'))
+    row['recovery_statistic'] = 'ratio_of_means'
     row['recovery_reference'] = 'pending'
     row['pending_native_n_frames'] = len(row['frame_scores'])
     row.update(cost_info)
@@ -210,7 +213,7 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
                 row.update(run.restoration)
             else:
                 raise ValueError(f'전환 시점의 복원율 측정이 누락되었습니다: {baseline.name}, {s}')
-            # TODO: 복원율의 기억 칸/객체/영상/반복 집계와 최종 표현 방식은 추후 결정.
-            # 지금은 restoration_frame_scores의 칸별 R²/SSE/SST만 JSONL에 저장한다.
+            # 원본에는 칸별 R²/SSE/SST만 저장한다.
+            # 전체 기억 R²과 객체/영상/회차 요약은 3_make_tables.py에서 재계산한다.
             rows.append(row)
     return rows

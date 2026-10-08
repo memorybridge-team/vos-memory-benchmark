@@ -16,12 +16,13 @@ def close(a, b):
 
 
 def test_recovery():
-    # 평균의 비율(90%) 대신 비율의 평균(75%). J와 J&F 모두 독립 계산한다.
+    # 구간 회복률은 평균의 비율(90%). 프레임별 비율의 평균(75%)과 구별한다.
     points = [recovery.point(11, FrameScore(.1, .1, True), FrameScore(.2, .2, True), 10),
               recovery.point(12, FrameScore(.8, .8, True), FrameScore(.8, .8, True), 10)]
     cols = recovery.columns(points)
-    close(cols['recovery_j'], 75)
-    close(cols['recovery_jf'], 75)
+    close(cols['recovery_j'], 90)
+    close(cols['recovery_jf'], 90)
+    close(sum(p['recovery_j'] for p in points) / 2, 75)
     assert cols['recovery_j_n_frames'] == cols['recovery_jf_n_frames'] == 2
     assert recovery.ratio(0, .8) == 0, '성능 실패 0점은 유효 회복률이다'
     assert recovery.ratio(.9, .5) == 180, '100% 초과를 자르지 않는다'
@@ -33,7 +34,8 @@ def test_recovery():
     close(point['recovery_jf'], 75)
     cols = recovery.columns([point])
     assert cols['zero_native_j_n_frames'] == 1 and cols['zero_native_jf_n_frames'] == 0
-    assert cols['recovery_j_n_frames'] == 0 and cols['recovery_jf_n_frames'] == 1
+    assert cols['recovery_j_n_frames'] == cols['recovery_jf_n_frames'] == 1
+    assert cols['recovery_j_defined_frame_count'] == 0 and cols['recovery_jf_defined_frame_count'] == 1
     # 비율 계산의 기본 수식. 실제 분모는 Native 반복 중앙값이다.
     close(recovery.ratio(.4, .5), 80)
     close(recovery.ratio(.4, .8), 50)
@@ -110,6 +112,11 @@ def test_recovery():
         assert row['frame_scores'][0]['native_j'] == .8
         assert row['frame_scores'][0]['native_reference_count'] == 3
         assert row['recovery_reference_runs'] == [1, 2, 3]
+        assert row['recovery_statistic'] == 'ratio_of_means'
+        close(row['pre_recovery_j'], 100)
+        close(row['pre_recovery_jf'], 100)
+        assert row['post_recovery_j'] == row['recovery_j']
+        assert row['pre_switch_frame_scores'][0]['recovery_j'] == 100
         if row['baseline'] == 'source_only':
             close(row['recovery_j'], 90)
             close(row['recovery_jf'], 90)
@@ -160,7 +167,49 @@ def test_recovery():
         raise AssertionError('서로 다른 Native 기록을 허용함')
     except ValueError:
         pass
-    print('OK: J·J&F 프레임 회복률, 0분모, 실패 포함, 영상 가중치, 반복 분산, 공통 표본')
+    # Native=0인 프레임을 포함한 구간 비율: 양쪽 평균에 동일한 프레임을 사용.
+    zero_points = [recovery.point(11, FrameScore(.4, .4, True), FrameScore(0, 0, True), 10),
+                   recovery.point(12, FrameScore(.4, .4, True), FrameScore(.8, .8, True), 10)]
+    zero_cols = recovery.columns(zero_points)
+    close(zero_cols['recovery_j'], 100)
+    assert zero_cols['recovery_j_n_frames'] == 2
+    assert zero_cols['recovery_j_defined_frame_count'] == 1
+    missing_point = recovery.point(13, FrameScore(1, 1, True), None, 10)
+    assert recovery.columns(zero_points + [missing_point])['recovery_j'] == 100
+    assert recovery.columns(zero_points + [missing_point])['missing_native_j_n_frames'] == 1
+    assert recovery.columns([])['recovery_j'] is None
+
+    # 전환 전후 구간 비율을 별도로 계산하고 프레임별 값과 Native 원점수를 보존한다.
+    phase_rows = []
+    for run_id in (1, 2, 3):
+        def p(frame, method_value, native_value):
+            return {'frame': frame, 'frames_after_switch': frame - 2,
+                    'j': method_value, 'jf': method_value,
+                    'native_run_j': native_value, 'native_run_jf': native_value}
+        phase_rows.append({'dataset': 'pumavos', 'seed': 0, 'video': 'phases', 'object': 1,
+                           'start': 0, 'end': 4, 'switch_frame': 2, 'switch_name': '50',
+                           'run_id': run_id, 'baseline': 'source_only', 'native_reference_id': str(run_id),
+                           'pre_switch_frame_scores': [p(1, .1, .2), p(2, .8, .8)],
+                           'frame_scores': [p(3, .2, .2), p(4, .4, .8)]})
+    phases = recovery.recompute(phase_rows)
+    for row in phases:
+        close(row['pre_recovery_j'], 90)
+        close(row['pre_recovery_jf'], 90)
+        close(row['post_recovery_j'], 60)
+        close(row['post_recovery_jf'], 60)
+        close(row['pre_recovery_j_method_mean'], .45)
+        close(row['post_recovery_j_native_mean'], .5)
+        assert row['pre_recovery_j_n_frames'] == row['post_recovery_j_n_frames'] == 2
+        close(sum(p['recovery_j'] for p in row['frame_scores']) / 2, 75)
+    assert recovery.recompute(phases) == phases
+    assert recovery.recompute(phase_rows[:2])[0]['pre_recovery_j'] is None
+    summary, per_run, per_video = summaries.build(phases)
+    close(summary[0]['pre_recovery_j_mean'], 90)
+    close(summary[0]['post_recovery_j_mean'], 60)
+    assert per_video[0]['pre_recovery_j_n_frames'] == 2
+    close(per_run[0]['post_recovery_j'], 60)
+
+    print('OK: J·J&F 전환 전후 구간/프레임 회복률, 0분모, 실패 포함, 영상 가중치, 반복 분산, 공통 표본')
 
 
 if __name__ == '__main__':

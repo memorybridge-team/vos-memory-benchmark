@@ -63,7 +63,7 @@ def check_rows(dataset: str) -> None:
     before = json.dumps(raw, sort_keys=True)
     rows = recovery.recompute(raw)
     assert json.dumps(raw, sort_keys=True) == before
-    assert all(r['recovery_reference'] == 'native_median' and r['pending_native_n_frames'] == 0 for r in rows)
+    assert all(r['recovery_reference'] == 'native_median' and r['pending_native_n_frames'] == r['pre_pending_native_n_frames'] == 0 for r in rows)
     for entry in load_video_list(dataset)["videos"]:
         for obj in entry["objects"]:
             assert [sw["name"] for sw in obj["switches"]] == ["50", "75"]
@@ -75,6 +75,9 @@ def check_rows(dataset: str) -> None:
                     assert set(got) == {m.name for m in METHODS}
                     assert got["translator"]["jf"] == got["direct_state_copy"]["jf"]
                     assert len({r['native_reference_id'] for r in got.values()}) == 1
+                    small_rows = [r for name, r in got.items() if name != 'full_replay']
+                    assert len({r['pre_recovery_j'] for r in small_rows}) == 1
+                    assert len({r['pre_recovery_jf'] for r in small_rows}) == 1
     for row in rows:
         assert not REMOVED_COLUMNS.intersection(row)
         assert row["evaluation_revision"] == settings.EVALUATION_REVISION
@@ -87,16 +90,22 @@ def check_rows(dataset: str) -> None:
         assert row['pre_switch_frame_scores']
         for point in row['pre_switch_frame_scores']:
             assert point['frames_after_switch'] <= 0
-            assert point['recovery_j'] is None and point['recovery_jf'] is None
+            for metric in ('j', 'jf'):
+                assert point[f'recovery_{metric}'] == ratio(point[metric], point[f'native_{metric}'])
         for point in row["frame_scores"]:
             assert point["frames_after_switch"] == point["frame"] - row["switch_frame"] > 0
             for metric in ('j', 'jf'):
                 assert point[f'recovery_{metric}'] == ratio(point[metric], point[f'native_{metric}'])
-        for metric in ('j', 'jf'):
-            values = [p[f'recovery_{metric}'] for p in row['frame_scores'] if p[f'recovery_{metric}'] is not None]
-            assert row[f'recovery_{metric}_n_frames'] == len(values)
-            if values:
-                assert abs(row[f'recovery_{metric}'] - sum(values) / len(values)) < 1e-9
+        assert row['recovery_statistic'] == 'ratio_of_means'
+        for phase, field in (('pre', 'pre_switch_frame_scores'), ('post', 'frame_scores')):
+            for metric in ('j', 'jf'):
+                pairs = [p for p in row[field] if p[metric] is not None and p[f'native_{metric}'] is not None]
+                assert row[f'{phase}_recovery_{metric}_n_frames'] == len(pairs)
+                expected = ratio(sum(p[metric] for p in pairs), sum(p[f'native_{metric}'] for p in pairs)) if pairs else None
+                actual = row[f'{phase}_recovery_{metric}']
+                assert actual is None if expected is None else abs(actual - expected) < 1e-9
+        assert row['recovery_j'] == row['post_recovery_j']
+        assert row['recovery_jf'] == row['post_recovery_jf']
         if row["baseline"] == "source_only":
             assert row["switch_seconds"] is None and row["switch_gpu_mb"] is None
         else:
@@ -154,7 +163,7 @@ def check_tables() -> None:
     difficulty = (tables / "extra.md").read_text(encoding="utf-8")
     for method in METHODS:
         assert f"| {method.label} |" in main and f"| {method.label} |" in difficulty
-    for column in ("회복률 J", "회복률 J&F", "전환시간(초)", "전환 GPU 메모리(MB)", "실패 비율(%)"):
+    for column in ("전환 전 회복률 J", "전환 전 회복률 J&F", "전환 후 회복률 J", "전환 후 회복률 J&F", "전환시간(초)", "전환 GPU 메모리(MB)", "실패 비율(%)", "복원율 R² (spatial)", "복원율 R² (pointer)", "R² 유효 객체"):
         assert column in main
     for gone in ("출력 일치도", "진단 비교군", "25%", "R^2", "복원율(", "전체 추적시간"):
         assert gone not in main + difficulty
@@ -169,23 +178,35 @@ def check_tables() -> None:
     assert {p['phase'] for p in points} == {'pre', 'post'}
     assert any(int(p['frames_after_switch']) < 0 for p in points)
     assert all(0 <= float(p['jf']) <= 100 and int(p['jf_run_count']) == 3 for p in points)
-    assert all(p['recovery_j'] == p['recovery_jf'] == '' for p in points if p['phase'] == 'pre')
+    assert all(p['recovery_j'] != '' and p['recovery_jf'] != '' for p in points if p['phase'] == 'pre')
     native_points = [p for p in points if p['baseline'] == 'full_replay' and p['phase'] == 'post']
     assert all(float(p['recovery_j']) == float(p['recovery_jf']) == 100 for p in native_points)
     for name in ('summary.csv', 'per_run.csv', 'per_video.csv'):
         with (tables / name).open(encoding='utf-8-sig', newline='') as stream:
             result = list(csv.DictReader(stream))
         assert result
+        for metric in ('pre_recovery_j', 'pre_recovery_jf', 'post_recovery_j', 'post_recovery_jf'):
+            assert all(r[metric + ('_mean' if name == 'summary.csv' else '')] != '' for r in result)
         if name == 'summary.csv':
             assert all(int(r['j_run_count']) == 3 and float(r['j_std']) == 0 for r in result)
         else:
             assert {int(r['run_id']) for r in result} == {1, 2, 3}
     assert '±' in main and '회차 수' in main and 'Native 기준=median' in main
+    with (tables / 'summary.csv').open(encoding='utf-8-sig', newline='') as stream:
+        r2_rows = list(csv.DictReader(stream))
+    for row in r2_rows:
+        if row['baseline'] == 'source_only':
+            assert row['r2_maskmem_features_mean'] == '' and row['r2_obj_ptr_mean'] == ''
+        else:
+            assert row['r2_maskmem_features_mean'] != '' and row['r2_obj_ptr_mean'] != ''
+        if row['baseline'] == 'full_replay':
+            assert float(row['r2_maskmem_features_mean']) == float(row['r2_obj_ptr_mean']) == 1
+        assert 'r2_obj_ptr_object_count' in row and 'r2_maskmem_features_object_count' in row
     with (tables / 'native_reference.csv').open(encoding='utf-8-sig', newline='') as stream:
         reference = list(csv.DictReader(stream))
     assert reference and all(r['native_statistic'] == 'median' and int(r['native_reference_count']) == 3 for r in reference)
     assert all(r['native_reference_ready'] == 'True' for r in reference)
-    snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*.median.jsonl'))
+    snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*.median.ratio_of_means.jsonl'))
     assert snapshots and all(r['recovery_reference'] == 'native_median' for r in records.read_rows(snapshots[0]))
     print("  OK 결과표: 전환별 요약, 난이도 성능, temporal.csv")
 
@@ -374,7 +395,7 @@ def test_end_to_end():
         check_old_list_rejected("m3vos")
         raw_before = {d: dataset_rows(d) for d in DATASETS}
         run_script('3_make_tables.py', '--native-statistic', 'mean')
-        assert (Path(settings.OUTPUT_ROOT) / 'analysis' / 'recovery.seed0.runs3.mean.jsonl').exists()
+        assert (Path(settings.OUTPUT_ROOT) / 'analysis' / 'recovery.seed0.runs3.mean.ratio_of_means.jsonl').exists()
         run_script("3_make_tables.py")
         assert all(dataset_rows(d) == raw_before[d] for d in DATASETS)
         check_tables()
