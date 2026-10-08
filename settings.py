@@ -59,3 +59,6 @@ VIDEO_LIST_REVISION = 2                 # 객체 기준 50/75% 목록은 재사�
 EVALUATION_REVISION = 4                 # 프레임별 기억 R² 및 Native feature 기준 추가 (영상 목록은 2 유지)
 EVALUATION_RUNS = 3                     # 전체 평가 반복 횟수
 EVALUATION_SEED = 0                     # 조건별 seed의 기준값
+
+# 계산/저장 정의는 같지만 메모리 복사·측정 오버헤드를 줄인 실행 버전. 비용 비교 시 구분한다.
+EVALUATION_RUNTIME_REVISION = 2

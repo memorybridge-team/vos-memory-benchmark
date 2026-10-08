@@ -13,10 +13,10 @@ from evaluation.data.common import dataset_root, print_first_video, videos_from_
 IGNORE_VALUE = None
 
 
-def load(split=None):
+def load(split=None, *, names=None):
     root = dataset_root("pumavos")
     return videos_from_folders("pumavos", root / "JPEGImages", root / "Annotations",
-                               ignore_value=IGNORE_VALUE)
+                               names=names, ignore_value=IGNORE_VALUE)
 
 
 if __name__ == "__main__":

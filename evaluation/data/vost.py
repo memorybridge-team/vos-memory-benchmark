@@ -13,11 +13,14 @@ from evaluation.data.common import dataset_root, print_first_video, read_names, 
 IGNORE_VALUE = 255
 
 
-def load(split: str = "val"):
+def load(split: str = "val", *, names=None):
     root = dataset_root("vost")
-    names = read_names(root / "ImageSets" / f"{split}.txt")
+    split_names = read_names(root / "ImageSets" / f"{split}.txt")
+    if names is not None:
+        selected = set(names)
+        split_names = [name for name in split_names if name in selected]
     return videos_from_folders(f"vost_{split}", root / "JPEGImages", root / "Annotations",
-                               names=names, ignore_value=IGNORE_VALUE)
+                               names=split_names, ignore_value=IGNORE_VALUE)
 
 
 def load_labels(split: str = "val") -> dict:

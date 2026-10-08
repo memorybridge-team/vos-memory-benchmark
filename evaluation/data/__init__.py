@@ -22,10 +22,10 @@ DATASETS = {
 }
 
 
-def load_dataset(name: str):
+def load_dataset(name: str, *, names=None):
     module_name, split = DATASETS[name]
     module = importlib.import_module(f"evaluation.data.{module_name}")
-    return module.load(split)
+    return module.load(split, names=names)
 
 
 def load_labels(name: str) -> dict:

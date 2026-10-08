@@ -22,19 +22,24 @@ def now() -> float:
     return time.perf_counter()
 
 
-def timed(frames):
+def timed(frames, measure_frames=None):
     """추적 결과를 한 장씩 받으면서 그 장을 만드는 데 걸린 시간을 같이 돌려준다.
 
     받은 뒤 채점하는 시간은 들어가지 않는다.
+    measure_frames 이후에는 동기화/시간 측정을 생략하고 seconds=None을 반환한다.
     """
     it = iter(frames)
+    index = 0
     while True:
-        t0 = now()
+        measure = measure_frames is None or index < measure_frames
+        t0 = now() if measure else None
         try:
             item = next(it)
         except StopIteration:
             return
-        yield item, now() - t0
+        seconds = now() - t0 if measure else None
+        index += 1
+        yield item, seconds
 
 
 def gpu_mb() -> float | None:
@@ -54,7 +59,7 @@ def gpu_peak_mb() -> float | None:
 
 def cost_columns(run, switch_frame: int) -> dict:
     """run = Base+ 실행 한 번. run.gpu_peaks[s] = 프레임 s 까지(준비 포함)의 최고치."""
-    if not run.times:
+    if switch_frame not in run.gpu_peaks:
         return dict(NO_COST)
     peak = run.gpu_peaks[switch_frame]
     return {

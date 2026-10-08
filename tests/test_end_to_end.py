@@ -256,17 +256,27 @@ def check_partial_resume(dataset):
     path.unlink()
     records.append_rows(path, [r for r in rows if r is not missing])
     old_track = fake_sam2.FakeSession.track
+    old_export = fake_sam2.FakeSession.export_memory
+    tracked, exported = [], []
 
     def forbid_native(self, first, last):
         if self.runner.name == 'base_plus' and self.cond and first == min(self.cond):
             raise AssertionError('이어하기에서 Native를 다시 실행함')
+        tracked.append((self.runner.name, first, last))
         yield from old_track(self, first, last)
 
+    def count_export(self):
+        if self.runner.name == 'small':
+            exported.append(max(list(self.cond) + list(self.non_cond)))
+        return old_export(self)
+
     fake_sam2.FakeSession.track = forbid_native
+    fake_sam2.FakeSession.export_memory = count_export
     try:
         run_script('2_evaluate.py', '--dataset', dataset)
     finally:
         fake_sam2.FakeSession.track = old_track
+        fake_sam2.FakeSession.export_memory = old_export
     completed = records.read_rows(path)
     assert len(completed) == len(rows)
     assert len(records.unique_rows(completed)) == len(completed)
@@ -275,6 +285,10 @@ def check_partial_resume(dataset):
     assert restored['frame_scores'] == missing['frame_scores']
     assert restored['recovery_j'] == missing['recovery_j']
     assert restored['restoration_frame_scores'] == missing['restoration_frame_scores']
+    assert restored['pre_switch_frame_scores'] == missing['pre_switch_frame_scores']
+    s = missing['switch_frame']
+    assert tracked == [('small', missing['start'], s), ('base_plus', s + 1, missing['end'])], tracked
+    assert exported == [s], exported
     print('  OK 회차별 일부 전환 이어하기, Native 기준 재실행 없이 유지')
 
 def check_old_list_rejected(dataset: str) -> None:

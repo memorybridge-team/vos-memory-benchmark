@@ -95,7 +95,9 @@ def _copy_to(x, device):
         return None
     if isinstance(x, (list, tuple)):
         return [_copy_to(v, device) for v in x]
-    return x.detach().to(device).clone()
+    # copy=True는 같은 장치에서도 독립된 저장 공간을 보장한다.
+    # 다른 장치로 옮긴 뒤 clone하는 두 번째 전체 복사를 피한다.
+    return x.detach().to(device=device, copy=True)
 
 
 class Session:

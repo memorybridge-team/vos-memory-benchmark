@@ -141,6 +141,8 @@ Native 비교군의 실제 3회 점수를 중앙값 기준으로 나누어 집�
 python tests/test_metrics.py
 python tests/test_recovery.py
 python tests/test_restoration.py
+python tests/test_recovery_curves.py
+python tests/test_optimizations.py
 python tests/test_end_to_end.py
 ```
 
@@ -157,3 +159,7 @@ n은 전환 비율별 모든 계획 객체의 `min(s-start, end-s)` 중 최솟�
 **한계:** 긴 영상의 구간 밖은 그림에서만 잘리므로 장기 회복/악화를 대표하지 않는다. 같은 프레임 수는 같은 실제 시간·사건·난이도를 뜻하지 않는다. GT 가려짐/누락 또는 Native=0 때문에 유효 N(t)는 여전히 달라질 수 있다. 이를 CSV와 그림에 표시하고 보간하거나 0점으로 채우지 않는다. 실제 실패를 이유로 사례를 제외하지 않는다. 전체 구간 표와 원본 프레임 값은 보존한다. 곡선은 프레임별 비율의 평균이고, 표의 구간 평균 점수 비율과 구별한다. 최종 논문 표현은 추후 재검토한다.
 
 그림을 생략하려면 `python scripts/3_make_tables.py --skip-recovery-plots`를 쓴다. 공통 구간 CSV와 메타데이터는 계속 저장한다.
+
+## 평가 실행 최적화
+
+중복 복사·측정·재추론을 줄이고 JSONL을 순차 읽도록 변경했다. 변경 사항, 합성 데이터 검증 결과와 비용 비교 시 실행 버전 구분은 [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md)를 참고한다.

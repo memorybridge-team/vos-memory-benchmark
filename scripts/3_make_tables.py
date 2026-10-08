@@ -21,12 +21,12 @@ from evaluation.data import load_video_list, video_list_path
 
 
 def load_raw_rows(seed=None, runs=None):
-    rows = []
-    for path in sorted((Path(settings.OUTPUT_ROOT) / 'records').glob('*.jsonl')):
-        rows += records.read_rows(path)
-    rows = records.unique_rows(records.current_rows(rows))
-    return [r for r in rows if (seed is None or r['seed'] == seed)
-            and (runs is None or r['run_id'] <= runs)]
+    # 현재 버전·선택 seed/회차만 보관한다. 제외/중복 JSONL의 전체 프레임을 쌓지 않는다.
+    rows = (r for path in sorted((Path(settings.OUTPUT_ROOT) / 'records').glob('*.jsonl'))
+            for r in records.iter_current_rows(records.iter_rows(path))
+            if (seed is None or r['seed'] == seed)
+            and (runs is None or r['run_id'] <= runs))
+    return records.unique_rows(rows)
 
 
 def load_rows(seed=None, runs=None, native_statistic='median'):

@@ -52,11 +52,18 @@ def write_rows(path: Path, rows: list[dict]) -> None:
     os.replace(temporary, path)
 
 
-def read_rows(path: Path) -> list[dict]:
+def iter_rows(path: Path):
+    """큰 프레임별 JSONL을 한 줄씩 읽어 메모리 사용량을 제한한다."""
     if not Path(path).exists():
-        return []
+        return
     with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        for line in f:
+            if line.strip():
+                yield json.loads(line)
+
+
+def read_rows(path: Path) -> list[dict]:
+    return list(iter_rows(path))
 
 
 def row_key(row: dict) -> tuple:
@@ -65,27 +72,36 @@ def row_key(row: dict) -> tuple:
             row["video"], row["object"], row["switch_name"], row["switch_frame"], row["baseline"])
 
 
-def done_keys(dataset: str) -> set[tuple]:
+def done_keys(dataset: str, *, videos=None, run_ids=None, seed=None) -> set[tuple]:
     """현재 정의로 끝난 결과 줄. 일부 전환만 완료된 방법도 나머지는 이어서 계산한다."""
     folder = records_path(dataset).parent
+    selected = None if videos is None else set(videos)
+    runs = None if run_ids is None else set(run_ids)
     return {row_key(r) for path in folder.glob(f"{dataset}*.jsonl")
-            for r in current_rows(read_rows(path))}
+            for r in iter_current_rows(iter_rows(path))
+            if (selected is None or r['video'] in selected)
+            and (runs is None or r['run_id'] in runs)
+            and (seed is None or r['seed'] == seed)}
 
 
 def current_rows(rows: list[dict]) -> list[dict]:
     """현재 평가 버전, 전환 시점, 방법 실행 정의에 맞는 결과만 고른다."""
+    return list(iter_current_rows(rows))
+
+
+def iter_current_rows(rows):
     from evaluation.methods import METHODS
 
     revisions = {m.name: m.revision for m in METHODS}
     switches = {str(round(f * 100)) for f in settings.SWITCH_FRACTIONS}
-    return [r for r in rows
+    return (r for r in rows
             if r.get("evaluation_revision") == settings.EVALUATION_REVISION
             and type(r.get("run_id")) is int and r["run_id"] > 0
             and type(r.get("seed")) is int
             and r.get("native_reference_id")
             and r["switch_name"] in switches
             and r["baseline"] in revisions
-            and r.get("baseline_revision", 1) == revisions[r["baseline"]]]
+            and r.get("baseline_revision", 1) == revisions[r["baseline"]])
 
 
 def unique_rows(rows: list[dict]) -> list[dict]:

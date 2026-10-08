@@ -18,10 +18,14 @@ from evaluation.data.common import dataset_root, print_first_video, read_names, 
 IGNORE_VALUE = 255
 
 
-def load(split=None):
+def load(split=None, *, names=None):
     data = dataset_root("m3vos") / "data"
+    split_names = read_names(data / "ImageSets" / "val.txt")
+    if names is not None:
+        selected = set(names)
+        split_names = [name for name in split_names if name in selected]
     return videos_from_folders("m3vos", data / "JPEGImages", data / "Annotations",
-                               names=read_names(data / "ImageSets" / "val.txt"),
+                               names=split_names,
                                ignore_value=IGNORE_VALUE)
 
 

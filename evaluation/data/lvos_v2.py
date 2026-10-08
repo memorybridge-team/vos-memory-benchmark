@@ -36,10 +36,10 @@ ATTRIBUTES = {
 }
 
 
-def load(split: str):
+def load(split: str, *, names=None):
     root = _split_root(split)
     return videos_from_folders(f"lvos_v2_{split}", root / "JPEGImages", root / "Annotations",
-                               ignore_value=IGNORE_VALUE)
+                               names=names, ignore_value=IGNORE_VALUE)
 
 
 def load_labels(split: str) -> dict:

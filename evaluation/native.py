@@ -28,21 +28,29 @@ def reference_key(ref):
             tuple((s['name'], s['frame']) for s in ref['switches']))
 
 
-def load_references(dataset):
+def load_references(dataset, *, videos=None, run_ids=None, seed=None):
     refs = {}
+    selected = None if videos is None else set(videos)
+    runs = None if run_ids is None else set(run_ids)
     for path in sorted((Path(settings.OUTPUT_ROOT) / 'native').glob(f'{dataset}.run*.jsonl')):
-        for ref in records.read_rows(path):
-            if ref.get('evaluation_revision') == settings.EVALUATION_REVISION and ref['dataset'] == dataset:
-                key = reference_key(ref)
-                if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
-                    raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
-                refs[key] = ref
+        for ref in records.iter_rows(path):
+            if ref.get('evaluation_revision') != settings.EVALUATION_REVISION or ref.get('dataset') != dataset:
+                continue
+            if (selected is not None and ref['video'] not in selected
+                    or runs is not None and ref['run_id'] not in runs
+                    or seed is not None and ref['seed'] != seed):
+                continue
+            key = reference_key(ref)
+            if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
+                raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
+            refs[key] = ref
     return refs
 
 
 def pack(video, obj, run, run_id, seed):
     return {
         'evaluation_revision': settings.EVALUATION_REVISION,
+        'runtime_revision': settings.EVALUATION_RUNTIME_REVISION,
         'native_reference_id': uuid4().hex,
         'native_memory_revision': restoration.REVISION,
         'dataset': video.dataset, 'video': video.name, 'object': obj['object'],

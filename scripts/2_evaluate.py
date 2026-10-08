@@ -59,48 +59,67 @@ def main():
             parser.error('--shard는 0 <= i < n인 i/n이어야 합니다.')
         entries = entries[i::n]
         suffix = f'.shard{i}of{n}'
-    videos = {v.name: v for v in load_dataset(args.dataset)}
-    translator.load()
-    small = sam2_runner.load_runner(settings.SOURCE_MODEL)
-    base = sam2_runner.load_runner(settings.TARGET_MODEL)
     methods = to_run()
-    done = records.done_keys(args.dataset)
-    refs = native.load_references(args.dataset)
+    names = {e['video'] for e in entries}
+    done = records.done_keys(args.dataset, videos=names, run_ids=run_ids, seed=args.seed)
+    done_cases = {k[:4] for k in done}
     total = sum(len(e['objects']) for e in entries)
-
+    tasks = []
     for run_id in run_ids:
-        out_path = records.records_path(args.dataset).with_name(f'{args.dataset}.run{run_id}{suffix}.jsonl')
-        ref_path = native.reference_path(args.dataset, run_id, args.shard)
         count = 0
         for entry in entries:
-            video = videos[entry['video']]
             for obj in entry['objects']:
                 count += 1
-                todo = [m for m in methods if any(
-                    (run_id, args.seed, video.name, obj['object'], sw['name'], sw['frame'], m.name) not in done
-                    for sw in obj['switches'])]
-                if not todo:
-                    continue
-                ref_key = native.case_key(video, obj, run_id, args.seed)
-                existing = refs.get(ref_key)
-                # 결과만 있고 기준 파일이 유실되었다면 새 분모를 조용히 섞지 않는다.
-                has_done = any(k[:4] == (run_id, args.seed, video.name, obj['object']) for k in done)
-                if has_done and existing is None:
-                    raise ValueError(f'완료 결과의 Native 기준이 없습니다: {ref_key}. outputs/native를 복구하세요.')
+                pending = {(sw['name'], sw['frame'], m.name)
+                           for sw in obj['switches'] for m in methods
+                           if (run_id, args.seed, entry['video'], obj['object'],
+                               sw['name'], sw['frame'], m.name) not in done}
+                if pending:
+                    todo = [m for m in methods if any(name == m.name for _, _, name in pending)]
+                    tasks.append((run_id, count, entry, obj, todo, pending))
+    if not tasks:
+        print('평가할 미완료 조건이 없습니다.')
+        return
 
-                def save_reference(ref):
-                    records.append_rows(ref_path, [ref])
-                    refs[ref_key] = ref
+    # 빈 shard/완료한 평가에는 모델과 데이터 파일 목록을 로딩하지 않는다.
+    active_names = {entry['video'] for _, _, entry, _, _, _ in tasks}
+    videos = {v.name: v for v in load_dataset(args.dataset, names=active_names)}
+    refs = native.load_references(args.dataset, videos=active_names, run_ids=run_ids, seed=args.seed)
+    needs_native = False
+    for run_id, _, entry, obj, _, _ in tasks:
+        ref_key = native.case_key(videos[entry['video']], obj, run_id, args.seed)
+        if ref_key not in refs:
+            if (run_id, args.seed, entry['video'], obj['object']) in done_cases:
+                raise ValueError(f'완료 결과의 Native 기준이 없습니다: {ref_key}. outputs/native를 복구하세요.')
+            needs_native = True
+    if any(m.name == 'translator' for _, _, _, _, todo, _ in tasks for m in todo):
+        translator.load()
+    small = (sam2_runner.load_runner(settings.SOURCE_MODEL)
+             if any(m.name != 'full_replay' for _, _, _, _, todo, _ in tasks for m in todo) else None)
+    base = (sam2_runner.load_runner(settings.TARGET_MODEL)
+            if needs_native or any(m.name not in ('source_only', 'full_replay')
+                                   for _, _, _, _, todo, _ in tasks for m in todo) else None)
 
-                t0 = time.time()
-                rows = evaluate_object(video, obj, small, base, todo, run_id=run_id, seed=args.seed,
-                                       native_reference=existing, save_native=save_reference)
-                rows = [r for r in rows if records.row_key(r) not in done]
-                records.append_rows(out_path, rows)
-                done.update(records.row_key(r) for r in rows)
-                print(f'[회차 {run_id}, {count}/{total}] {video.name} 객체 {obj["object"]}: '
-                      f'{len(rows)}줄, {time.time() - t0:.0f}초')
-        print(f'결과: {out_path}')
+    for run_id, count, entry, obj, todo, pending in tasks:
+        out_path = records.records_path(args.dataset).with_name(f'{args.dataset}.run{run_id}{suffix}.jsonl')
+        ref_path = native.reference_path(args.dataset, run_id, args.shard)
+        video = videos[entry['video']]
+        ref_key = native.case_key(video, obj, run_id, args.seed)
+
+        def save_reference(ref):
+            records.append_rows(ref_path, [ref])
+            refs[ref_key] = ref
+
+        t0 = time.time()
+        rows = evaluate_object(video, obj, small, base, todo, run_id=run_id, seed=args.seed,
+                               native_reference=refs.get(ref_key), save_native=save_reference,
+                               pending_conditions=pending)
+        records.append_rows(out_path, rows)
+        done.update(records.row_key(r) for r in rows)
+        print(f'[회차 {run_id}, {count}/{total}] {video.name} 객체 {obj["object"]}: '
+              f'{len(rows)}줄, {time.time() - t0:.0f}초')
+    print(f'결과: {out_path}')
+
 
 
 if __name__ == '__main__':

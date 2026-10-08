@@ -27,7 +27,11 @@ def load() -> None:
     global _translator
     root = Path(settings.TRANSLATOR_DIR)
     weights = root / settings.TRANSLATOR_WEIGHTS
-    if hashlib.sha256(weights.read_bytes()).hexdigest() != settings.TRANSLATOR_SHA256:
+    digest = hashlib.sha256()
+    with weights.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    if digest.hexdigest() != settings.TRANSLATOR_SHA256:
         raise ValueError(f"전달받은 translator 가중치가 아닙니다 (SHA256 다름): {weights}")
     sys.path.insert(0, str(root / settings.TRANSLATOR_SOURCE))
     from vos_memory_inspector.transformer_translator import TransformerStateTranslator
