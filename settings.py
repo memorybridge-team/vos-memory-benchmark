@@ -57,8 +57,8 @@ J_MAIN_DATASETS = ("vost_val", "m3vos")  # 주 지표가 J 인 데이터셋 (VOS
 
 # ── 평가 지표 ────────────────────────────────────────────────────────
 RECALL_J = 0.5                          # 실패 비율: 1 − mean(J > 0.5), J는 내부적으로 0~1
-VIDEO_LIST_REVISION = 3                 # 25/50/75%, 전환별 최소 관찰 구간
-EVALUATION_REVISION = 6                 # 전환 자격과 전체 프레임 SQLite 원점수
+VIDEO_LIST_REVISION = 4                 # 모든 전환의 s-start >= 8인 공통 객체
+EVALUATION_REVISION = 7                 # 하나라도 s-start < 8이면 객체 전체 제외
 EVALUATION_RUNS = 3                     # 전체 평가 반복 횟수
 EVALUATION_SEED = 0                     # 조건별 seed의 기준값
 

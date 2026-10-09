@@ -120,7 +120,7 @@ def test_selection_and_idle():
         assert requested == [{'101_cut_carrot'}, {'102_break_egg'}], requested
         assert {r['video'] for r in first} == requested[0]
         assert {r['video'] for r in rows} == requested[0] | requested[1]
-        expected = sum(len(e['objects']) for e in data.load_video_list('vost_val')['videos']) * 2 * 6
+        expected = sum(len(e['objects']) for e in data.load_video_list('vost_val')['videos']) * 3 * 6
         assert len(rows) == len(records.unique_rows(rows)) == expected
         assert all(r['runtime_revision'] == settings.EVALUATION_RUNTIME_REVISION for r in rows)
 

@@ -39,8 +39,8 @@ def fails(call, error=ValueError):
 
 
 def test_eligibility_before_loading():
-    assert switch_points(0, 12) == [{'name': '75', 'frame': 9}]
-    assert switch_points(0, 10) == [{'name': '75', 'frame': 8}]
+    assert switch_points(0, 12) == []
+    assert switch_points(0, 10) == []
     assert switch_points(0, 9) == []
     assert switch_points(4, 36)[0] == {'name': '25', 'frame': 12}
     bad = {'object': 1, 'start': 0, 'end': 12, 'switches': [{'name': '50', 'frame': 6}]}
@@ -56,6 +56,18 @@ def test_eligibility_before_loading():
                baseline='source_only', baseline_revision=1, switch_name='50', switch_frame=6,
                evaluation_revision=settings.EVALUATION_REVISION, native_reference_id='id')
     assert records.current_rows([row]) == []
+    # 75% 자체는 9프레임이어도 25%가 짧으므로 모든 방법에서 제외한다.
+    rows = [dict(row, baseline=m.name, baseline_revision=m.revision,
+                 switch_name='75', switch_frame=9) for m in METHODS]
+    assert records.current_rows(rows) == []
+    assert evaluate_object(SimpleNamespace(name='v'), bad, None, None, METHODS) == []
+    exact = dict(bad, end=32, switches=switch_points(0, 32))
+    assert len(eligible_objects([{'video': 'v', 'objects': [exact]}])[0]['objects'][0]['switches']) == 3
+    partial = dict(exact, switches=exact['switches'][1:])
+    assert eligible_objects([{'video': 'v', 'objects': [partial]}]) == []
+    # 이전 실험은 저장 당시의 전환별 규칙으로 별도 집계한다.
+    legacy = dict(evaluation_revision=6, switch_fractions=[.25,.5,.75], min_pre_switch_frames=8)
+    assert len(records.current_rows([dict(r, evaluation_revision=6) for r in rows], configuration=legacy)) == len(METHODS)
 
 
 def test_all_frames_and_atomic_resume():
@@ -74,7 +86,7 @@ def test_all_frames_and_atomic_resume():
             refs.append(ref)
         rows = evaluate_object(video, obj, fake_sam2.FakeRunner('small'), fake_sam2.FakeRunner('base_plus'),
                                METHODS, save_native=save, save_result=lambda r: store.save_results([r]))
-        assert len(rows) == 12 and len(refs) == 1
+        assert len(rows) == 18 and len(refs) == 1
         raw = store.read_results('vost_val')
         visible = store.read_results('vost_val', visible_only=True)
         for row in raw:
@@ -104,10 +116,10 @@ def test_all_frames_and_atomic_resume():
         broken['frame_scores'][0]['phase'] = 'unused'
         broken['frame_scores'][0]['has_gt'] = 2
         fails(lambda: store.save_results([broken]), sqlite3.IntegrityError)
-        assert len(store.read_results('vost_val')) == 12
-        assert len(records.done_keys('vost_val', run_ids=[1])) == 12
+        assert len(store.read_results('vost_val')) == 18
+        assert len(records.done_keys('vost_val', run_ids=[1])) == 18
         fails(lambda: store.save_results([rows[0]]), sqlite3.IntegrityError)
-        assert len(store.read_results('vost_val')) == 12
+        assert len(store.read_results('vost_val')) == 18
         with store.connect() as conn:
             assert conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1
             assert not conn.execute('PRAGMA foreign_key_check').fetchall()
@@ -120,7 +132,7 @@ def test_all_frames_and_atomic_resume():
         assert a != b and store.read_results('vost_val') == before
         with store.connect() as conn:
             assert conn.execute('SELECT COUNT(*) FROM analyses').fetchone()[0] == 2
-            assert conn.execute('SELECT COUNT(*) FROM recovery_summaries').fetchone()[0] == 24
+            assert conn.execute('SELECT COUNT(*) FROM recovery_summaries').fetchone()[0] == 36
             assert conn.execute('SELECT post_recovery_j FROM recovery_summaries WHERE analysis_id=? LIMIT 1', (b,)).fetchone()[0] is None
         # 같은 실험에서 방법 revision만 바뀌어도 이전 행을 덮어쓰지 않는다.
         revised = copy.deepcopy(rows[0]); revised['baseline_revision'] += 1
@@ -128,7 +140,7 @@ def test_all_frames_and_atomic_resume():
         with patch('evaluation.methods.METHODS', [SimpleNamespace(name=revised['baseline'], revision=revised['baseline_revision'])]):
             selected = store.read_results('vost_val')
             assert len(selected) == 1 and selected[0]['baseline_revision'] == revised['baseline_revision']
-        assert len(store.read_results('vost_val')) == 12
+        assert len(store.read_results('vost_val')) == 18
         # 새 revision은 같은 DB에 보관하고 현재 조회에서는 이전 결과를 제외한다.
         with patch.object(settings, 'EVALUATION_REVISION', settings.EVALUATION_REVISION + 1):
             assert store.read_results('vost_val') == [] and records.done_keys('vost_val') == set()
@@ -140,7 +152,7 @@ def test_all_frames_and_atomic_resume():
             changed_row['evaluation_revision'] = settings.EVALUATION_REVISION
             store.save_results([changed_row])
             assert len(store.read_results('vost_val')) == 1
-        assert len(store.read_results('vost_val')) == 12
+        assert len(store.read_results('vost_val')) == 18
         native.memory_path(ref).unlink()
         fails(lambda: native.load_references('vost_val'))
 
@@ -167,7 +179,7 @@ def test_prediction_gaps_are_errors():
     with tempfile.TemporaryDirectory(prefix='vos_prediction_gap_') as tmp:
         setup(Path(tmp))
         video = data.load_dataset('vost_val')[0]
-        obj = dict(object=1, start=0, end=29, switches=switch_points(0, 29))
+        obj = dict(object=1, start=0, end=video.num_frames - 1, switches=switch_points(0, video.num_frames - 1))
         original = fake_sam2.FakeSession.track
         def skip(self, first, last):
             for out in original(self, first, last):
@@ -184,17 +196,16 @@ def test_prediction_gaps_are_errors():
 
 def test_25_and_repeat_resume():
     with tempfile.TemporaryDirectory(prefix='vos_switch25_') as tmp:
-        setup(Path(tmp))
         # 33프레임이면 최초 등장 0인 객체는 25%에서 정확히 8프레임을 본다.
         with patch.object(fake_data, 'N', 33):
-            fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
+            setup(Path(tmp))
         run_script('1_make_video_list.py', '--datasets', 'pumavos')
         assert data.load_video_list('pumavos')['videos'][0]['objects'][0]['switches'][0] == {'name': '25', 'frame': 8}
         for runs in (1, 2, 3):
             run_script('2_evaluate.py', '--dataset', 'pumavos', '--runs', str(runs))
             raw = store.read_results('pumavos')
-            assert len(raw) == runs * 8 * len(METHODS)
-            assert len(native.load_references('pumavos')) == runs * 3
+            assert len(raw) == runs * 6 * len(METHODS)
+            assert len(native.load_references('pumavos')) == runs * 2
         before = store.read_results('pumavos')
         with patch.object(sam2_runner, 'load_runner', side_effect=AssertionError('완료 결과 재실행')):
             run_script('2_evaluate.py', '--dataset', 'pumavos', '--runs', '3')
@@ -213,4 +224,4 @@ if __name__ == '__main__':
     test_concurrent_initialization()
     test_prediction_gaps_are_errors()
     test_25_and_repeat_resume()
-    print('OK: 전환별 사전 제외, 전체 프레임/NULL, 원자적 SQLite 재개, 버전/집계 정의 분리, 25%, 1→2→3회')
+    print('OK: 객체 전체 사전 제외, 전체 프레임/NULL, 원자적 SQLite 재개, 버전/집계 정의 분리, 25%, 1→2→3회')

@@ -1,4 +1,4 @@
-"""가짜 모델·데이터로 50/75% 평가, 새 지표, 난이도·시계열 표와 이어하기를 검증한다.
+"""가짜 모델·데이터로 25/50/75% 평가, 새 지표, 난이도·시계열 표와 이어하기를 검증한다.
 
     python tests/test_end_to_end.py
 """
@@ -67,7 +67,7 @@ def check_rows(dataset: str) -> None:
     assert all(r['recovery_reference'] == 'native_median' and r['pending_native_n_frames'] == r['pre_pending_native_n_frames'] == 0 for r in rows)
     for entry in load_video_list(dataset)["videos"]:
         for obj in entry["objects"]:
-            assert [sw["name"] for sw in obj["switches"]] == ["50", "75"]
+            assert [sw["name"] for sw in obj["switches"]] == ["25", "50", "75"]
             for run_id in range(1, settings.EVALUATION_RUNS + 1):
                 for sw in obj["switches"]:
                     got = {r["baseline"]: r for r in rows if r["video"] == entry["video"]
@@ -139,7 +139,7 @@ def check_rows(dataset: str) -> None:
         assert set(memories) == {sw['frame'] for sw in ref['switches']}
         assert all(set(entry) == {'maskmem_features', 'obj_ptr', 'is_cond'}
                    for snapshot in memories.values() for entry in snapshot.values())
-    assert len(rows) == objects * 3 * 2 * len(METHODS)
+    assert len(rows) == objects * 3 * 3 * len(METHODS)
     assert all(len({r['native_reference_id'] for r in rows if r['run_id'] == ref['run_id']
                     and r['video'] == ref['video'] and r['object'] == ref['object']}) == 1
                for ref in refs.values())
@@ -149,9 +149,9 @@ def check_rows(dataset: str) -> None:
             assert later["switch_seconds"] >= row["switch_seconds"], (row, later)
 
     # 객체 2는 12~17 프레임에 안 보인다. 경과 프레임을 압축해 새로 번호 매기지 않는다.
-    hidden = next(r for r in rows if r["object"] == 2 and r["switch_name"] == "50")
-    assert hidden["frame_scores"][0]["frames_after_switch"] == 4
-    print(f"  OK {dataset}: {len(rows)}줄, 50/75%, 지표와 전환 비용")
+    hidden = next(r for r in rows if r["object"] == 2 and r["switch_name"] == "25")
+    assert [p["frames_after_switch"] for p in hidden["frame_scores"][:3]] == [1, 2, 9]
+    print(f"  OK {dataset}: {len(rows)}줄, 25/50/75%, 지표와 전환 비용")
 
 
 def check_void() -> None:
@@ -175,7 +175,7 @@ def check_tables() -> None:
     assert "공통 난이도 유형" in difficulty and "가려짐" in difficulty and "모양·상태 변화" in difficulty
     with (tables / "temporal.csv").open(encoding="utf-8-sig", newline="") as stream:
         points = list(csv.DictReader(stream))
-    assert points and {p["switch_name"] for p in points} == {"50", "75"}
+    assert points and {p["switch_name"] for p in points} == {"25", "50", "75"}
     assert {p["baseline"] for p in points} == {m.name for m in METHODS}
     assert {p['phase'] for p in points} == {'pre', 'post'}
     assert any(int(p['frames_after_switch']) < 0 for p in points)
@@ -214,11 +214,11 @@ def check_tables() -> None:
     assert snapshots and all(r['recovery_reference'] == 'native_median' for r in records.read_rows(snapshots[0]))
     with (tables / 'recovery_common_window.csv').open(encoding='utf-8-sig', newline='') as stream:
         curves = list(csv.DictReader(stream))
-    assert curves and {p['switch_name'] for p in curves} == {'50', '75'}
+    assert curves and {p['switch_name'] for p in curves} == {'25', '50', '75'}
     assert {p['baseline'] for p in curves} == {m.name for m in METHODS}
     figure_dir = Path(settings.OUTPUT_ROOT) / 'figures' / store.select_experiment()['experiment_id'] / 'recovery_common.seed0.runs3.median'
     windows = json.loads((figure_dir / 'windows.json').read_text(encoding='utf-8'))
-    assert len(windows) == len(DATASETS) * 2
+    assert len(windows) == len(DATASETS) * 3
     for window in windows:
         assert window['status'] == 'ok' and window['window_basis'] == 'stored_native_object_ranges'
         assert window['cohort_object_count'] == window['planned_object_count']
@@ -239,7 +239,7 @@ def check_legacy_results(dataset: str) -> None:
         dict(last, baseline_revision=1, video="legacy_only"),
         dict(source, baseline="original_replay_16"),
         dict(source, baseline="reset", role="extra"),
-        dict(source, switch_name="25"),
+        dict(source, switch_name="10"),
         dict(source, evaluation_revision=2),
         dict(source, evaluation_revision=4),
         {k: v for k, v in source.items() if k != 'run_id'},
@@ -249,7 +249,7 @@ def check_legacy_results(dataset: str) -> None:
     records.append_rows(path, incompatible)
     assert records.row_key(incompatible[1]) not in records.done_keys(dataset)
     loaded = runpy.run_path(str(ROOT / "scripts/3_make_tables.py"))["load_rows"]()
-    assert all(r["video"] != "legacy_only" and r["switch_name"] != "25" for r in loaded)
+    assert all(r["video"] != "legacy_only" and r["switch_name"] != "10" for r in loaded)
     assert all(r["baseline"] not in ("reset", "original_replay_16") for r in loaded)
     print("  OK 이전 평가 기준과 제거된 비교군 결과 제외")
 

@@ -69,12 +69,14 @@ def test_metrics():
     assert cost.cost_columns(run, 8)["switch_seconds"] == 2.0
 
     assert settings.SWITCH_FRACTIONS == (0.25, 0.5, 0.75)
-    assert switch_points(5, 29) == [{"name": "50", "frame": 17}, {"name": "75", "frame": 23}]
+    assert switch_points(5, 29) == []
     assert switch_points(0, 9) == []
-    assert switch_points(0, 11) == [{"name": "75", "frame": 8}]
-    assert switch_points(5, 15) == [{"name": "75", "frame": 13}]
-    assert switch_points(0, 12) == [{"name": "75", "frame": 9}]
-    assert switch_points(0, 32)[0] == {"name": "25", "frame": 8}
+    assert switch_points(0, 11) == []
+    assert switch_points(5, 15) == []
+    assert switch_points(0, 12) == []
+    assert switch_points(0, 32) == [{"name": "25", "frame": 8}, {"name": "50", "frame": 16}, {"name": "75", "frame": 24}]
+    assert switch_points(0, 29) == []
+    assert switch_points(0, 30)[0]["frame"] == switch_points(0, 31)[0]["frame"] == 8
     assert switch_points(0, 34)[0] == {"name": "25", "frame": 8}  # round(8.5)=8
     assert switch_points(0, 38)[0] == {"name": "25", "frame": 10} # round(9.5)=10
     # 한 영상에 객체가 많아도 영상의 가중치는 동일하다. 가시성이 없는 시간점은 섞지 않는다.

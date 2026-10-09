@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-H, W, N = 36, 48, 30
+H, W, N = 36, 48, 38
 COLORS = {1: (200, 30, 30), 2: (30, 200, 30), 3: (30, 30, 200)}
 PALETTE = [0, 0, 0, 200, 30, 30, 30, 200, 30, 30, 30, 200] + [128] * (256 * 3 - 12)
 

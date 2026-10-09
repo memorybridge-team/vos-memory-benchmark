@@ -90,9 +90,11 @@ def iter_current_rows(rows, *, configuration=None, revisions=None):
     minimum = settings.MIN_PRE_SWITCH_FRAMES if configuration is None else configuration['min_pre_switch_frames']
     from evaluation.switches import switch_points
     def eligible(row):
+        # 버전 7부터 객체 전체 제외. 이전 DB 실험은 저장 당시 정의로 별도 집계한다.
         return (row['switch_name'], row['switch_frame']) in {
             (s['name'], s['frame']) for s in switch_points(row['start'], row['end'],
-                                                        fractions=fractions, min_pre_frames=minimum)}
+                                                        fractions=fractions, min_pre_frames=minimum,
+                                                        whole_object=evaluation_revision >= 7)}
     switches = {str(round(f * 100)) for f in fractions}
     return (r for r in rows
             if r.get("evaluation_revision") == evaluation_revision
