@@ -77,3 +77,49 @@ def f_score(pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray | None = None) 
     if precision + recall == 0:
         return 0.0
     return float(2 * precision * recall / (precision + recall))
+
+
+@dataclass(frozen=True)
+class PreparedGroundTruth:
+    mask: np.ndarray
+    ignore: np.ndarray | None
+    boundary: np.ndarray
+    distance: np.ndarray | None
+    n_boundary: int
+    threshold: float
+    visible: bool
+
+    @property
+    def nbytes(self):
+        return sum(x.nbytes for x in (self.mask, self.ignore, self.boundary, self.distance) if x is not None)
+
+
+def prepare_ground_truth(gt, ignore=None):
+    ignore = None if ignore is None else np.array(ignore, dtype=bool, copy=True)
+    mask = np.array(_keep(gt, ignore), dtype=bool, copy=True)
+    boundary = _boundary(mask, ignore)
+    n = int(boundary.sum())
+    distance = (cv2.distanceTransform((~boundary).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+                if n else None)
+    for array in (mask, ignore, boundary, distance):
+        if array is not None:
+            array.setflags(write=False)
+    return PreparedGroundTruth(mask, ignore, boundary, distance, n,
+                               settings.BOUNDARY_THRESHOLD * np.hypot(*mask.shape), bool(gt.any()))
+
+
+def score_prepared(pred, gt):
+    """기존 J/F 정의를 유지하며 정답의 경계·거리 변환만 재사용한다."""
+    j = j_score(pred, gt.mask, gt.ignore)
+    pred_b = _boundary(_keep(pred, gt.ignore), gt.ignore)
+    n_pred = int(pred_b.sum())
+    if n_pred == 0 and gt.n_boundary == 0:
+        f = 1.0
+    elif n_pred == 0 or gt.n_boundary == 0:
+        f = 0.0
+    else:
+        to_pred = cv2.distanceTransform((~pred_b).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+        precision = (gt.distance[pred_b] <= gt.threshold).sum() / n_pred
+        recall = (to_pred[gt.boundary] <= gt.threshold).sum() / gt.n_boundary
+        f = float(2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    return FrameScore(j, f, gt.visible)

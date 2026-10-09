@@ -45,6 +45,7 @@ def pack(video, obj, run, run_id, seed):
         'dataset': video.dataset, 'video': video.name, 'object': obj['object'],
         'start': obj['start'], 'end': obj['end'], 'switches': obj['switches'],
         'run_id': run_id, 'seed': seed,
+        'cpu_profile': run.cpu_profile,
         'scores': [score_point(f, run.scores.get(f)) for f in range(obj['start'], obj['end'] + 1)],
         'frame_times': [{'frame': f, 'seconds': run.times.get(f), 'gpu_peak_mb': run.gpu_peaks.get(f)}
                         for f in range(obj['start'], obj['end'] + 1)],

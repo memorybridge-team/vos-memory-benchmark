@@ -24,10 +24,13 @@ SAM2 기억 = inference_state["output_dict_per_obj"][객체]:
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
+from threading import Lock
 
 import numpy as np
 import torch
@@ -46,7 +49,7 @@ MEMORY_FIELDS = ("maskmem_features", "maskmem_pos_enc", "pred_masks",
 class FrameOut:
     frame: int
     mask: np.ndarray    # bool (높이, 너비), 원본 해상도
-    visible: bool       # SAM2가 "객체가 보인다"고 판단했는가 (object_score_logits > 0)
+    visible: bool | None  # 기본: presence > 0. benchmark에서 조회를 생략하면 None
 
 
 def load_runner(model_key: str) -> "SAM2Runner":
@@ -72,6 +75,40 @@ class SAM2Runner:
         return Session(self, video)
 
 
+class CPUFrameCache:
+    """객체 실행 안에서만 공유하는 정규화된 CPU 입력 LRU. 반환 tensor는 독립 복사다."""
+
+    def __init__(self, limit_mb):
+        self.limit = int(limit_mb * 1024 ** 2)
+        if self.limit < 0:
+            raise ValueError('RGB_CACHE_MB는 0 이상이어야 합니다.')
+        self.entries = OrderedDict()
+        self.nbytes = 0
+        self.lock = Lock()
+
+    def get(self, key):
+        with self.lock:
+            value = self.entries.pop(key, None)
+            if value is None:
+                return None
+            self.entries[key] = value
+            return value.clone()
+
+    def put(self, key, value):
+        size = value.numel() * value.element_size()
+        if not self.limit or size > self.limit:
+            return
+        with self.lock:
+            old = self.entries.pop(key, None)
+            if old is not None:
+                self.nbytes -= old.numel() * old.element_size()
+            while self.entries and self.nbytes + size > self.limit:
+                _, old = self.entries.popitem(last=False)
+                self.nbytes -= old.numel() * old.element_size()
+            self.entries[key] = value.detach().clone()
+            self.nbytes += size
+
+
 class LazyFrames:
     """프레임을 필요할 때 한 장씩 읽는다.
 
@@ -89,6 +126,9 @@ class LazyFrames:
         self._pending = None
         self._after = None
         self._last = -1
+        self.cache = None
+        self.profile = {'read_count': 0, 'read_prepare_seconds': 0.0,
+                        'cache_hits': 0, 'cache_misses': 0, 'cache_bypasses': 0}
 
     def __len__(self):
         return len(self.paths)
@@ -111,10 +151,30 @@ class LazyFrames:
 
     def _read(self, i):
         # 이 worker는 CPU 이미지 준비만 한다. CUDA와 SAM2 상태에는 접근하지 않는다.
+        use_cache = self.cache is not None and self._after is not None and i > self._after
+        key = None
+        if use_cache and self.cache.limit:
+            path = Path(self.paths[i]).resolve()
+            stat = path.stat()
+            key = (str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
+                   self.image_size, tuple(self.MEAN.flatten().tolist()), tuple(self.STD.flatten().tolist()))
+            value = self.cache.get(key)
+            if value is not None:
+                self.profile['cache_hits'] += 1
+                return value
+            self.profile['cache_misses'] += 1
+        else:
+            self.profile['cache_bypasses'] += 1
+        t0 = perf_counter()
         with Image.open(self.paths[i]) as im:
             im = im.convert("RGB").resize((self.image_size, self.image_size))
             x = torch.from_numpy(np.asarray(im, dtype=np.float32) / 255.0).permute(2, 0, 1)
-        return (x - self.MEAN) / self.STD
+        x = (x - self.MEAN) / self.STD
+        self.profile['read_count'] += 1
+        self.profile['read_prepare_seconds'] += perf_counter() - t0
+        if key is not None:
+            self.cache.put(key, x)
+        return x
 
     def configure_prefetch(self, measure_through, last):
         """측정 마지막 프레임 뒤에서만 다음 한 장을 준비한다."""
@@ -144,6 +204,7 @@ class Session:
         import sam2.sam2_video_predictor as svp
 
         self.predictor = runner.predictor
+        self.skip_visible = False
         frames = LazyFrames(video.frame_paths, self.predictor.image_size)
         self.frames = frames
         height, width = video.size
@@ -199,12 +260,17 @@ class Session:
                 except StopIteration:
                     return
                 mask = (logits[0, 0] > 0).cpu().numpy()
-                visible = self._visible(frame)
+                visible = None if self.skip_visible else self._visible(frame)
                 self._forget_old(frame)
             yield FrameOut(frame, mask, visible)
 
     def configure_prefetch(self, measure_through: int, last: int):
         self.frames.configure_prefetch(measure_through, last)
+
+    def configure_benchmark(self, frame_cache=None):
+        """일반 Session 기본 동작은 유지하고 benchmark에서만 선택한다."""
+        self.frames.cache = frame_cache
+        self.skip_visible = settings.BENCHMARK_SKIP_VISIBLE
 
     def close(self) -> None:
         self.frames.close()

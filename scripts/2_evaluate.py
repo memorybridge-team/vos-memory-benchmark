@@ -106,21 +106,22 @@ def main():
             if needs_native or any(m.name not in ('source_only', 'full_replay')
                                    for _, _, _, _, todo, _ in tasks for m in todo) else None)
 
-    for run_id, count, entry, obj, todo, pending in tasks:
-        video = videos[entry['video']]
-        ref_key = native.case_key(video, obj, run_id, args.seed)
+    with store.reuse_connection():
+        for run_id, count, entry, obj, todo, pending in tasks:
+            video = videos[entry['video']]
+            ref_key = native.case_key(video, obj, run_id, args.seed)
 
-        def save_reference(ref):
-            store.save_native(ref)
-            refs[ref_key] = ref
+            def save_reference(ref):
+                store.save_native(ref)
+                refs[ref_key] = ref
 
-        t0 = time.time()
-        rows = evaluate_object(video, obj, small, base, todo, run_id=run_id, seed=args.seed,
-                               native_reference=refs.get(ref_key), save_native=save_reference,
-                               pending_conditions=pending, save_result=lambda row: store.save_results([row]))
-        done.update(records.row_key(r) for r in rows)
-        print(f'[회차 {run_id}, {count}/{total}] {video.name} 객체 {obj["object"]}: '
-              f'{len(rows)}줄, {time.time() - t0:.0f}초')
+            t0 = time.time()
+            rows = evaluate_object(video, obj, small, base, todo, run_id=run_id, seed=args.seed,
+                                   native_reference=refs.get(ref_key), save_native=save_reference,
+                                   pending_conditions=pending, save_result=lambda row: store.save_results([row]))
+            done.update(records.row_key(r) for r in rows)
+            print(f'[회차 {run_id}, {count}/{total}] {video.name} 객체 {obj["object"]}: '
+                  f'{len(rows)}줄, {time.time() - t0:.0f}초')
     print(f'결과: {store.database_path()}')
 
 

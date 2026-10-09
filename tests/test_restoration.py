@@ -1,6 +1,7 @@
 """프레임별 R²의 수학, 누락/퇴화 조건 및 s+1 이전 측정·비용 제외 검증."""
 
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -132,7 +133,10 @@ def test_timing():
             self.closed = True
 
     class Keeper:
-        def keep(self, *args):
+        def tracking(self, run):
+            return nullcontext()
+
+        def keep(self, *args, **kwargs):
             pass
 
     original_result = restoration.result

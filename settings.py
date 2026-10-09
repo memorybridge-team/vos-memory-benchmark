@@ -63,7 +63,13 @@ EVALUATION_RUNS = 3                     # 전체 평가 반복 횟수
 EVALUATION_SEED = 0                     # 조건별 seed의 기준값
 
 # 계산/저장 정의는 같지만 메모리 복사·측정 오버헤드를 줄인 실행 버전. 비용 비교 시 구분한다.
-EVALUATION_RUNTIME_REVISION = 3
+EVALUATION_RUNTIME_REVISION = 5
 PREFETCH_FRAMES = True                  # 시간 측정 없는 추적 구간만 CPU 다음 프레임 준비
+SCORING_WORKERS = 1                     # CPU 채점 worker 수. 0이면 동기 채점
+SCORING_QUEUE_FRAMES = 4                # 실행/대기 중인 예측 마스크 수의 상한
+GT_CACHE_MB = 128                       # 객체별 정답 마스크·경계·거리 변환 LRU 상한 (MiB)
+RGB_CACHE_MB = 256                      # 객체 실행 안에서 공유하는 CPU 입력 LRU (측정 구간 우회)
+RESTORATION_CACHE_MB = 128              # 같은 회차 Native float64/SST LRU 상한 (MiB)
+BENCHMARK_SKIP_VISIBLE = True           # 미사용 visible 조회 생략. 일반 Session에는 적용하지 않음
 SQLITE_JOURNAL_MODE = "DELETE"         # 공유 볼륨에서 WAL을 자동 사용하지 않음; 로컬 디스크만 WAL
 SQLITE_BUSY_TIMEOUT_SECONDS = 30

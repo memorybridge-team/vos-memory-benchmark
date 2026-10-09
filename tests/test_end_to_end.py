@@ -4,6 +4,7 @@
 """
 
 import csv
+from contextlib import nullcontext
 import json
 import runpy
 import shutil
@@ -367,7 +368,7 @@ def check_baseline_contract() -> None:
 
     obj = {"start": 0, "end": 12, "switches": [{"frame": 6}, {"frame": 10}]}
     small = SimpleNamespace(start=lambda video: SmallSession())
-    keeper = SimpleNamespace(keep=lambda run, frame, mask: None)
+    keeper = SimpleNamespace(keep=lambda run, frame, mask: None, tracking=lambda run: nullcontext())
     _, packages = _run_small(small, None, obj, prompt, keeper)
     assert packages[6].last_visible[0] == 3
     assert packages[10].last_visible[0] == 8

@@ -7,6 +7,8 @@ maskmem_features와 obj_ptr를 각각 펼쳐 R² = 1 - SSE / SST를 구한다.
 """
 
 import math
+from collections import OrderedDict
+from dataclasses import dataclass
 
 import torch
 
@@ -14,7 +16,60 @@ FIELDS = ('maskmem_features', 'obj_ptr')
 REVISION = 1
 
 
-def tensor_score(native, prepared):
+@dataclass(frozen=True)
+class NativeStatistics:
+    values: torch.Tensor
+    finite: bool
+    center: float | None
+    sst: float | None
+
+
+def _native_statistics(native):
+    # copy=True로 float64 입력도 저장 공간을 공유하지 않는다.
+    y = native.detach().to(device='cpu', dtype=torch.float64, copy=True).reshape(-1)
+    finite = bool(torch.isfinite(y).all())
+    center = float(y.mean()) if y.numel() and finite else None
+    sst = float(((y - center) ** 2).sum()) if center is not None else None
+    return NativeStatistics(y, finite, center, sst)
+
+
+class NativeStatsCache:
+    """한 객체/회차의 변경하지 않는 Native snapshot만 보관하는 제한된 LRU."""
+
+    def __init__(self, limit_mb):
+        self.limit = int(limit_mb * 1024 ** 2)
+        if self.limit < 0:
+            raise ValueError('RESTORATION_CACHE_MB는 0 이상이어야 합니다.')
+        self.entries = OrderedDict()
+        self.nbytes = 0
+        self.hits = self.misses = 0
+
+    def statistics(self, native):
+        try:
+            version = native._version
+        except RuntimeError:
+            # export_features가 만든 inference tensor는 version counter가 없다.
+            # 이 객체/회차의 snapshot은 비교 중 변경하지 않는다.
+            version = None
+        key = (id(native), version)
+        if key in self.entries:
+            tensor, stats = self.entries.pop(key)
+            self.entries[key] = (tensor, stats)  # 원본 참조를 유지하여 id 재사용을 막는다.
+            self.hits += 1
+            return stats
+        self.misses += 1
+        stats = _native_statistics(native)
+        size = stats.values.numel() * stats.values.element_size()
+        if self.limit and size <= self.limit:
+            while self.entries and self.nbytes + size > self.limit:
+                _, (_, old) = self.entries.popitem(last=False)
+                self.nbytes -= old.values.numel() * old.values.element_size()
+            self.entries[key] = (native, stats)
+            self.nbytes += size
+        return stats
+
+
+def tensor_score(native, prepared, cache=None):
     """한 필드의 tensor 원소를 펼친 R²과 재집계용 충분통계량. 계산은 CPU float64."""
     result = {'r2': None, 'sse': None, 'sst': None, 'native_mean': None,
               'n_elements': 0,
@@ -24,14 +79,14 @@ def tensor_score(native, prepared):
         return {**result, 'status': 'missing_native_tensor' if native is None else 'missing_target_tensor'}
     if tuple(native.shape) != tuple(prepared.shape):
         return {**result, 'status': 'shape_mismatch'}
-    y = native.detach().to(device='cpu', dtype=torch.float64).reshape(-1)
+    stats = cache.statistics(native) if cache is not None else _native_statistics(native)
+    y = stats.values
     pred = prepared.detach().to(device='cpu', dtype=torch.float64).reshape(-1)
     if not y.numel():
         return {**result, 'status': 'empty_tensor'}
-    if not bool(torch.isfinite(y).all() and torch.isfinite(pred).all()):
+    if not bool(stats.finite and torch.isfinite(pred).all()):
         return {**result, 'status': 'nonfinite_tensor'}
-    center = float(y.mean())
-    sst = float(((y - center) ** 2).sum())
+    center, sst = stats.center, stats.sst
     sse = float(((pred - y) ** 2).sum())
     if not all(math.isfinite(v) for v in (center, sst, sse)):
         return {**result, 'status': 'nonfinite_statistics'}
@@ -46,7 +101,7 @@ def tensor_score(native, prepared):
     return {**result, 'r2': r2, 'status': 'ok'}
 
 
-def frame_scores(prepared, native, switch_frame):
+def frame_scores(prepared, native, switch_frame, cache=None):
     """전환 때 두 memory bank에 남아 있는 기억 프레임을 번호로 대응한다.
 
     누락 칸은 N/A와 사유로 남긴다. 객체 가시성/마스크 성공 여부로 기억을 삭제하지 않는다.
@@ -59,7 +114,7 @@ def frame_scores(prepared, native, switch_frame):
                  'target_is_cond': actual.get('is_cond') if actual is not None else None}
         for field in FIELDS:
             score = tensor_score(reference.get(field) if reference is not None else None,
-                                 actual.get(field) if actual is not None else None)
+                                 actual.get(field) if actual is not None else None, cache)
             if reference is None:
                 score['status'] = 'missing_native_frame'
             elif actual is None:
@@ -69,10 +124,10 @@ def frame_scores(prepared, native, switch_frame):
     return points
 
 
-def result(prepared, native, switch_frame):
+def result(prepared, native, switch_frame, cache=None):
     return {'restoration_revision': REVISION, 'restoration_reference': 'native_same_run',
             'restoration_measured_at': switch_frame, 'restoration_status': 'measured' if native or prepared else 'empty_memory',
-            'restoration_frame_scores': frame_scores(prepared, native, switch_frame)}
+            'restoration_frame_scores': frame_scores(prepared, native, switch_frame, cache)}
 
 
 def not_applicable(switch_frame):

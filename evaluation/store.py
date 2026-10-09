@@ -4,9 +4,10 @@ JSONL은 과거 자료/분석 내보내기에만 사용한다. 새 평가의 재
 """
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 import hashlib
-from itertools import chain
+from itertools import chain, count
 import json
 from pathlib import Path
 import sqlite3
@@ -17,6 +18,8 @@ from evaluation.scoring import restoration
 SCHEMA_VERSION = 1
 POINT_FIELDS = ('pre_switch_frame_scores', 'frame_scores', 'frame_times', 'restoration_frame_scores')
 _TABLE_COLUMNS = {}
+_SHARED_CONNECTION = ContextVar('benchmark_connection', default=None)
+_TRANSACTION_IDS = count()
 
 
 def database_path():
@@ -60,7 +63,11 @@ def experiment():
                   device=settings.DEVICE, use_bf16=settings.USE_BF16,
                   offload_state_to_cpu=settings.OFFLOAD_STATE_TO_CPU,
                   boundary_threshold=settings.BOUNDARY_THRESHOLD, recall_j=settings.RECALL_J,
-                  prefetch_frames=settings.PREFETCH_FRAMES)
+                  prefetch_frames=settings.PREFETCH_FRAMES,
+                  scoring_workers=settings.SCORING_WORKERS, scoring_queue_frames=settings.SCORING_QUEUE_FRAMES,
+                  gt_cache_mb=settings.GT_CACHE_MB, rgb_cache_mb=settings.RGB_CACHE_MB,
+                  restoration_cache_mb=settings.RESTORATION_CACHE_MB,
+                  benchmark_skip_visible=settings.BENCHMARK_SKIP_VISIBLE)
     report = Path(settings.OUTPUT_ROOT) / 'checks' / 'sam2.json'
     if report.is_file():
         # require_passed가 현재 설치와의 일치를 검사한다. 가짜 테스트에는 이 기록이 없다.
@@ -72,8 +79,7 @@ def experiment():
     return hashlib.sha256(encoded.encode()).hexdigest(), encoded
 
 
-@contextmanager
-def connect():
+def _open_connection():
     path = database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=settings.SQLITE_BUSY_TIMEOUT_SECONDS)
@@ -90,10 +96,57 @@ def connect():
             conn.executescript('BEGIN IMMEDIATE;\n' + Path(__file__).with_name('schema.sql').read_text() + '\nCOMMIT;')
         elif version != SCHEMA_VERSION:
             raise ValueError(f'지원하지 않는 SQLite 스키마 버전: {version}')
-        with conn:
-            yield conn
-    finally:
+    except BaseException:
         conn.close()
+        raise
+    return conn
+
+
+@contextmanager
+def reuse_connection():
+    """추론 중에는 트랜잭션 없이 연결만 유지한다. commit 단위는 각 connect 호출이다."""
+    path = database_path().resolve()
+    existing = _SHARED_CONNECTION.get()
+    if existing is not None:
+        if existing[0] != path:
+            raise ValueError('DB 연결 재사용 중 OUTPUT_ROOT를 변경할 수 없습니다.')
+        yield
+        return
+    conn = _open_connection()
+    token = _SHARED_CONNECTION.set((path, conn))
+    try:
+        yield
+    finally:
+        _SHARED_CONNECTION.reset(token)
+        conn.close()
+
+
+@contextmanager
+def connect():
+    shared = _SHARED_CONNECTION.get()
+    if shared is not None and shared[0] != database_path().resolve():
+        raise ValueError('DB 연결 재사용 중 OUTPUT_ROOT를 변경할 수 없습니다.')
+    conn = shared[1] if shared is not None else _open_connection()
+    # SAVEPOINT로 중첩 호출도 외부 트랜잭션을 조기에 commit하지 않는다.
+    name = f'benchmark_tx_{next(_TRANSACTION_IDS)}'
+    outermost = not conn.in_transaction
+    try:
+        conn.execute(f'SAVEPOINT {name}')
+        try:
+            yield conn
+            conn.execute(f'RELEASE SAVEPOINT {name}')
+        except BaseException:
+            # SQLite가 오류로 트랜잭션 전체를 이미 취소했으면 원래 예외를 보존한다.
+            if conn.in_transaction:
+                if outermost:
+                    conn.rollback()  # commit 잠금 오류에서도 다음 호출 전에 잠금을 해제한다.
+                else:
+                    conn.execute(f'ROLLBACK TO SAVEPOINT {name}')
+                    conn.execute(f'RELEASE SAVEPOINT {name}')
+            raise
+    finally:
+        if shared is None:
+            conn.close()
 
 
 def _fields(conn, table, row):
