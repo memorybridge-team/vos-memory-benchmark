@@ -1,6 +1,6 @@
-"""회차별 Native 원점수·비용은 JSONL, 전환 시점 기억 기준은 CPU tensor 파일에 보존한다."""
+"""회차별 Native 원점수·비용과 전환 시점 기억 tensor를 SQLite에 보존한다."""
 
-import os
+import io
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -8,7 +8,7 @@ from uuid import uuid4
 import torch
 
 import settings
-from evaluation import cost, records
+from evaluation import cost, store
 from evaluation.scoring.jf import FrameScore
 from evaluation.scoring import restoration
 
@@ -29,21 +29,13 @@ def reference_key(ref):
 
 
 def load_references(dataset, *, videos=None, run_ids=None, seed=None):
+    store.import_legacy(dataset)
     refs = {}
-    selected = None if videos is None else set(videos)
-    runs = None if run_ids is None else set(run_ids)
-    for path in sorted((Path(settings.OUTPUT_ROOT) / 'native').glob(f'{dataset}.run*.jsonl')):
-        for ref in records.iter_rows(path):
-            if ref.get('evaluation_revision') != settings.EVALUATION_REVISION or ref.get('dataset') != dataset:
-                continue
-            if (selected is not None and ref['video'] not in selected
-                    or runs is not None and ref['run_id'] not in runs
-                    or seed is not None and ref['seed'] != seed):
-                continue
-            key = reference_key(ref)
-            if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
-                raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
-            refs[key] = ref
+    for ref in store.iter_references(dataset, videos=videos, run_ids=run_ids, seed=seed):
+        key = reference_key(ref)
+        if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
+            raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
+        refs[key] = ref
     return refs
 
 
@@ -74,24 +66,17 @@ def memory_path(ref):
 
 
 def save_memories(ref, snapshots):
-    """전환 시점 CPU 기억 snapshot을 원자적으로 저장한 뒤 Native JSONL을 쓰게 한다."""
-    path = memory_path(ref)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix('.pt.tmp')
-    payload = {'native_reference_id': ref['native_reference_id'],
-               'native_memory_revision': restoration.REVISION, 'snapshots': snapshots}
-    with temporary.open('wb') as stream:
-        torch.save(payload, stream)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    """Native scalar와 tensor BLOB을 함께 SQLite에 저장한다."""
+    store.save_native(ref, snapshots)
 
 
 def load_memories(ref):
-    path = memory_path(ref)
-    if not path.exists():
-        raise ValueError(f'Native 기억 기준 파일이 없습니다: {path}. outputs/native_memory를 복구하세요.')
-    payload = torch.load(path, map_location='cpu', weights_only=True)
+    path = memory_path(ref)  # ID 검증 및 이전 .pt 호환
+    blob = store.memory_blob(ref['native_reference_id'])
+    if blob is None and not path.exists():
+        raise ValueError(f"Native 기억 기준이 DB/이전 .pt에 없습니다: {ref['native_reference_id']}")
+    source = io.BytesIO(blob) if blob is not None else path
+    payload = torch.load(source, map_location='cpu', weights_only=True)
     if (payload.get('native_reference_id') != ref['native_reference_id']
             or payload.get('native_memory_revision') != restoration.REVISION):
         raise ValueError(f'Native 기억 기준의 ID/버전이 다릅니다: {path}')

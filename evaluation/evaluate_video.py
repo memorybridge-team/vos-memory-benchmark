@@ -19,6 +19,7 @@ import numpy as np
 
 import settings
 from evaluation import cost, native, repeats
+from evaluation.switches import object_exclusion
 from baseline import no_handoff
 from baseline.handoff import HandoffPackage
 from evaluation.scoring import jf, main_metrics, recovery, restoration
@@ -153,6 +154,7 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
            "cost_runtime_revision": (None if baseline.name == 'source_only'
                                      else reference.get('runtime_revision', 1) if baseline.name == 'full_replay'
                                      else settings.EVALUATION_RUNTIME_REVISION),
+           "frame_prefetch": settings.FRAME_PREFETCH,
            "run_id": run_id, "seed": seed,
            "native_reference_id": reference["native_reference_id"]}
     # 전환 뒤, 정답에 객체가 보이는 프레임만 채점한다.
@@ -178,7 +180,10 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
 
 def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
                     native_reference=None, save_native=None, pending_conditions=None) -> list[dict]:
-    """각 회차 Native를 한 번만 실행/저장하고 모든 방법·50/75%에 공유한다."""
+    """각 회차 Native를 한 번만 실행/저장하고 모든 방법·25/50/75%에 공유한다."""
+    # 직접 호출도 짧은 객체의 모든 전환을 제외한다. 모델/프롬프트/Native 실행 전 검사.
+    if object_exclusion(obj) is not None:
+        return []
     seed = settings.EVALUATION_SEED if seed is None else seed
     conditions = {(sw['name'], sw['frame'], m.name) for sw in obj['switches'] for m in methods}
     if pending_conditions is not None:
@@ -199,8 +204,7 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
         reference = native.pack(video, obj, replay_run, run_id, seed)
         native_memories = replay_run.feature_snapshots
         if save_native is not None:
-            native.save_memories(reference, native_memories)
-            save_native(reference)
+            save_native(reference, native_memories)
     elif native.reference_key(reference) != native.case_key(video, obj, run_id, seed):
         raise ValueError("Native의 영상·객체·전환·회차·seed가 평가 조건과 다릅니다.")
     if native_reference is not None:

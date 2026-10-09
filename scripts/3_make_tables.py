@@ -1,4 +1,4 @@
-"""[3] JSONL → 반복 통계·영상별 점수·전환 전후 곡선. 낮은 점수도 모두 포함.
+"""[3] SQLite → 반복 통계·영상별 점수·전환 전후 곡선. 낮은 점수도 모두 포함.
 
 python scripts/3_make_tables.py
 python scripts/3_make_tables.py --runs 1 --seed 0
@@ -14,18 +14,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import settings
-from evaluation import records
+from evaluation import records, store
 from evaluation.scoring import recovery, restoration
 from evaluation.tables import extra_tables, main_tables, summaries, temporal, recovery_curves
 from evaluation.data import load_video_list, video_list_path
 
 
 def load_raw_rows(seed=None, runs=None):
-    # 현재 버전·선택 seed/회차만 보관한다. 제외/중복 JSONL의 전체 프레임을 쌓지 않는다.
-    rows = (r for path in sorted((Path(settings.OUTPUT_ROOT) / 'records').glob('*.jsonl'))
-            for r in records.iter_current_rows(records.iter_rows(path))
-            if (seed is None or r['seed'] == seed)
-            and (runs is None or r['run_id'] <= runs))
+    store.import_legacy()
+    rows = records.iter_current_rows(store.iter_evaluations(seed=seed, runs=runs,
+                                                          revision=settings.EVALUATION_REVISION))
     return records.unique_rows(rows)
 
 
@@ -45,6 +43,7 @@ def load_object_labels():
 
 
 def write_csv(path, fields, rows):
+    store.put_document('tables', path.name, rows)
     with path.open('w', encoding='utf-8-sig', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
@@ -80,6 +79,7 @@ def main():
         print(f'저장: {out_dir / name}')
     # 기본 결과 폴더는 마지막 집계를 보여준다. 정의별 JSONL은 원본과 별도로 보존한다.
     snapshot = Path(settings.OUTPUT_ROOT) / 'analysis' / f'recovery.seed{args.seed}.runs{args.runs}.{args.native_statistic}.ratio_of_means.jsonl'
+    store.save_analysis(snapshot.stem, rows)
     records.write_rows(snapshot, rows)
     print(f'저장: {snapshot}')
     write_csv(out_dir / 'native_reference.csv', recovery.REFERENCE_FIELDS,
@@ -94,6 +94,7 @@ def main():
     write_csv(out_dir / 'recovery_common_window.csv', recovery_curves.CSV_FIELDS, curves)
     curve_dir = Path(settings.OUTPUT_ROOT) / 'figures' / f'recovery_common.seed{args.seed}.runs{args.runs}.{args.native_statistic}'
     curve_dir.mkdir(parents=True, exist_ok=True)
+    store.put_document('curve_windows', curve_dir.name, windows)
     (curve_dir / 'windows.json').write_text(json.dumps(windows, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     for window in windows:
         print(f"공통 구간: {window['dataset']} 전환 {window['switch_name']}%, "

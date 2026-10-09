@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import settings  # noqa: E402
 from evaluation.data import DATASETS, labels_of, load_dataset, load_labels, video_list_path  # noqa: E402
 from evaluation.data.common import object_ids  # noqa: E402
-from evaluation.switches import switch_points  # noqa: E402
+from evaluation.switches import switch_points, object_exclusion  # noqa: E402
 
 
 def scan_visibility(video) -> dict[int, dict[int, bool]]:
@@ -34,24 +34,28 @@ def scan_visibility(video) -> dict[int, dict[int, bool]]:
 def make_list(dataset: str) -> dict:
     videos = load_dataset(dataset)
     labels = load_labels(dataset)          # [추가] 공식 라벨 (없는 데이터셋은 빈 dict)
-    entries, skipped = [], 0
+    entries, excluded = [], []
     for i, video in enumerate(videos, 1):
         end = video.num_frames - 1
         objects = []
         for obj_id, visible in scan_visibility(video).items():
             start = min(f for f, v in visible.items() if v)
-            if end - start < settings.MIN_TRACK_FRAMES:
-                skipped += 1
+            obj = {"object": obj_id, "start": start, "end": end,
+                   "switches": switch_points(start, end),
+                   "extra_labels": labels_of(labels, video.name, obj_id)}
+            reason = object_exclusion(obj)
+            if reason is not None:
+                excluded.append({"video": video.name, **obj, **reason})
                 continue
-            objects.append({"object": obj_id, "start": start, "end": end,
-                            "switches": switch_points(start, end),
-                            "extra_labels": labels_of(labels, video.name, obj_id)})
+            objects.append(obj)
         entries.append({"video": video.name, "num_frames": video.num_frames, "objects": objects})
         if i % 50 == 0 or i == len(videos):
             print(f"  {dataset}: {i}/{len(videos)}")
     return {"dataset": dataset, "evaluation_revision": settings.VIDEO_LIST_REVISION,
             "switch_basis": "object", "switch_fractions": list(settings.SWITCH_FRACTIONS),
-            "skipped_short_objects": skipped, "videos": entries}
+            "exclude_if_pre_switch_frames_lte": settings.MIN_TRACK_FRAMES,
+            "exclusion_scope": "all_switches_methods_runs",
+            "skipped_short_objects": len(excluded), "excluded_objects": excluded, "videos": entries}
 
 
 def main():
@@ -63,6 +67,8 @@ def main():
         path = video_list_path(dataset)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        from evaluation import store
+        store.put_document('video_lists', dataset, data)
         n_obj = sum(len(v["objects"]) for v in data["videos"])
         print(f"{dataset}: 영상 {len(data['videos'])}, 객체 {n_obj}, "
               f"짧아서 뺀 객체 {data['skipped_short_objects']} → {path}")

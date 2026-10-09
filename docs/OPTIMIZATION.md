@@ -1,3 +1,5 @@
+> 아래는 실행 버전 2의 최적화 기록이다. 현재 버전 3의 25/50/75%·SQLite·CPU 선행 준비는 [SWITCH25_SQLITE.md](SWITCH25_SQLITE.md)를 따른다.
+
 # 평가 실행 경량화
 
 추론 및 평가 정의 버전은 4로 유지하며 실행 구현 버전(`runtime_revision`)은 2다.

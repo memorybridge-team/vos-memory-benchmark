@@ -76,7 +76,7 @@ def test_selection_and_idle():
         assert requested == [{'101_cut_carrot'}, {'102_break_egg'}], requested
         assert {r['video'] for r in first} == requested[0]
         assert {r['video'] for r in rows} == requested[0] | requested[1]
-        expected = sum(len(e['objects']) for e in data.load_video_list('vost_val')['videos']) * 2 * 6
+        expected = sum(len(e['objects']) for e in data.load_video_list('vost_val')['videos']) * len(settings.SWITCH_FRACTIONS) * 6
         assert len(rows) == len(records.unique_rows(rows)) == expected
         assert all(r['runtime_revision'] == settings.EVALUATION_RUNTIME_REVISION for r in rows)
 
@@ -89,13 +89,15 @@ def test_selection_and_idle():
             run_script('2_evaluate.py', '--dataset', 'vost_val', '--runs', '1', '--shard', '3/4')
 
         # Native 행만 누락된 경우 이미 저장된 기준을 사용한다. Small/Base+/translator를 안 켠다.
-        path = records.records_path('vost_val').with_name('vost_val.run1.shard0of2.jsonl')
-        original_rows = records.read_rows(path)
+        original_rows = [r for r in dataset_rows('vost_val') if r['video'] == '101_cut_carrot']
         missing = [r for r in original_rows if r['baseline'] == 'full_replay' and r['object'] == 1]
-        records.write_rows(path, [r for r in original_rows if r not in missing])
+        from evaluation import store
+        with store.connection() as conn:
+            conn.execute("DELETE FROM evaluations WHERE dataset='vost_val' AND video='101_cut_carrot' "
+                         "AND baseline='full_replay' AND object_id=1")
         with patch.object(sam2_runner, 'load_runner', forbidden), patch.object(translator, 'load', forbidden):
             run_script('2_evaluate.py', '--dataset', 'vost_val', '--runs', '1', '--shard', '0/2')
-        restored = {records.row_key(r): r for r in records.read_rows(path)}
+        restored = {records.row_key(r): r for r in dataset_rows('vost_val')}
         assert all(restored[records.row_key(r)] == r for r in missing)
         assert len(dataset_rows('vost_val')) == expected
 

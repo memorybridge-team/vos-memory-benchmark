@@ -1,3 +1,5 @@
+> 현재 실행: 평가 정의 버전 5, 목록 버전 3. 원본은 SQLite에 저장한다. 저장·이관·GPU 실행 구조는 [SWITCH25_SQLITE.md](SWITCH25_SQLITE.md)를 따른다. Native 중앙값 정의는 유지한다.
+
 # 평가 프로토콜
 
 ## 연구 주제
@@ -8,7 +10,7 @@ J·J&F 회복률을 프레임별로 계산하며 전체 평가를 기본 3회 �
 
 - 본 모델은 팀 translator 전달본의 선정 epoch 27을 사용한다.
 - 모델은 실행 전에 미리 로드한다. GPU가 여러 개여도 시간과 메모리 비교는 같은 종류의 GPU에서 한다.
-- 각 회차의 객체마다 Small과 Base+ Native를 한 번씩 실행하고, 50/75% 전환에 공유한다.
+- 각 회차의 객체마다 Small과 Base+ Native를 한 번씩 실행하고, 25/50/75% 전환에 공유한다.
 - 정답은 객체가 처음 나타난 프레임의 프롬프트 한 번에만 사용한다.
 
 ## 데이터
@@ -34,8 +36,8 @@ J·J&F 회복률을 프레임별로 계산하며 전체 평가를 기본 3회 �
 ## 전환 시점
 
 객체가 처음 나타난 프레임을 a, 영상 마지막 프레임을 e라고 할 때
-s = a + round(f × (e − a)), f ∈ {0.50, 0.75}이다.
-전환 이름은 "50", "75"이고, Small은 s까지, Base+는 s+1부터 처리한다.
+s = a + round(f × (e − a)), f ∈ {0.25, 0.50, 0.75}이다.
+전환 이름은 "25", "50", "75"이고, Small은 s까지, Base+는 s+1부터 처리한다.
 짧은 구간에서는 s를 a+1과 e−1 사이로 제한한다.
 객체 최초 등장 기준을 유지하므로 같은 영상의 객체라도 전환 프레임은 다를 수 있다.
 
@@ -53,7 +55,7 @@ s = a + round(f × (e − a)), f ∈ {0.50, 0.75}이다.
 Full Replay도 그 실제 입력을 동일하게 사용한다. 향후 수정 프롬프트를 지원하면 프레임·마스크 기록을 함께 재현해야 한다.
 Original + Last-Visible은 object_score_logits와 관계없이 비어 있지 않은 예측을 고른다.
 마지막 예측이 처음 프레임이거나 한 번도 비어 있지 않은 예측이 없으면 처음 정답만 사용한다.
-Replay는 s−7~s를 다시 본다. 처음 프롬프트 이후 구간이 8프레임보다 짧으면 있는 구간만 다시 본다.
+세 전환 중 하나라도 s−a ≤ 8이면 객체를 모든 전환·방법·회차에서 공통 제외한다. 목록 생성·실행 전·집계에 같은 규칙을 적용한다. Replay는 유효한 객체에서 정확히 s−7~s의 8프레임을 다시 본다. 짧은 Replay로 축소하지 않는다.
 
 ## 본 모델
 
@@ -83,7 +85,7 @@ Replay는 s−7~s를 다시 본다. 처음 프롬프트 이후 구간이 8프레
 
 채점 대상은 기존처럼 전환 뒤 정답에 객체가 보이는 프레임이다.
 LVOS v2·PUMaVOS의 주 지표는 J&F, VOST·M3VOS의 주 지표는 J이며 모든 데이터셋에 J·J&F를 함께 보고한다.
-영상별 객체 평균을 구한 뒤 영상 평균을 보고하며, 50%·75%는 별도 표로 만든다.
+영상별 객체 평균을 구한 뒤 영상 평균을 보고하며, 25%·50%·75%는 별도 표로 만든다.
 
 결과 줄은 `run_id`, `seed`, `native_reference_id`, `j`, `jf`, `n_frames`, `failure_rate`를 저장한다.
 `frame_scores`는 전환 이후 평가 프레임의 원래 번호, 상대 프레임(f−s), J·F·J&F,
@@ -106,7 +108,7 @@ Native 비교군의 전환 전 점수는 Native, 나머지 방법은 Small의 �
 - 실패0도 Native 표본에 포함한다. 중앙값을 계산하기 전에 낮은 점수를 삭제하지 않는다.
 - 선택한 모든 회차의 해당 Native 원점수가 있어야 기준을 확정한다. 미완료면 회복률은 None이다.
 - `3_make_tables.py --native-statistic mean`이면 같은 원점수에서 평균 분모로 재집계한다.
-- Native는 처음 실제 정답 프롬프트부터 끝까지 실행한다. 50/75%는 같은 실행에서 구간만 나눈다.
+- Native는 처음 실제 정답 프롬프트부터 끝까지 실행한다. 25/50/75%는 같은 실행에서 구간만 나눈다.
 - 프레임별 분모가 0 또는 누락이면 해당 프레임 회복률은 None(N/A). 구간 회복률은 아래의 평균 비율로 별도 계산한다. 분모에 작은 상수를 더하지 않는다.
 - 양수인 낮은 Native 기준은 자동 제외하지 않는다. Native 실패(J≤0.5) 횟수는 별도 기록하며 기준의 안정성 판단은 별도 문제이다.
 - 추후 처리 계획: 현재는 반복 실패의 발생 빈도를 모르므로 중앙값을 기본으로 유지한다. 반복 측정에서 Native 실패가 연속해서 빈번히 나타나면 실패 사례를 제외한 표를 별도 재집계하는 방안을 검토한다. 구체적인 제외 기준·단위는 그때 정하고 제외 건수를 명시한다. 모든 방법에 같은 사례 선택을 적용하고 원본과 실패 포함 결과를 보존하므로 추론 없이 사후 분석할 수 있다. 현재 자동 제외는 구현하지 않는다.
@@ -177,17 +179,17 @@ Target에 없는 Native 기억 칸은 대표값에 포함하지 않는다. Targe
 기존 main/extra 표에 `복원율 R² (spatial)`, `복원율 R² (pointer)` 두 열과 지표별 유효 객체 수를 표시한다.
 summary/per_run/per_video CSV에도 두 값을 포함하며, summary CSV는 두 지표의 유효 영상·객체 수를 별도로 기록한다.
 부분 결과는 기존처럼 회차 간 공통 유효 사례로 집계한다. N/A를 0으로 바꾸지 않는다.
-대표값은 `3_make_tables.py`가 원본 충분통계량에서 계산하여 별도 분석 JSONL에 저장한다. 추론 JSONL은 바꾸지 않는다.
+대표값은 `3_make_tables.py`가 원본 충분통계량에서 계산하여 SQLite의 analysis_rows에 저장하고 분석 JSONL로 내보낸다. 추론 원본은 바꾸지 않는다.
 
 
-R² 계산·통계용 CPU 기억 추출·파일 저장은 전환시간과 GPU peak 측정 밖에서 실행한다.
-Native는 50/75%에서 두 필드의 CPU 기억을 snapshot으로 꺼내 `outputs/native_memory/<native_reference_id>.pt`에 먼저 보존한다.
-이어하기에서는 이 파일을 재사용한다. 유실되면 Native를 다시 실행해 조용히 기준을 바꾸지 않고 오류를 낸다.
-`outputs/records`, `outputs/native`, `outputs/native_memory`를 함께 보존한다.
+R² 계산·통계용 CPU 기억 추출·DB 저장은 전환시간과 GPU peak 측정 밖에서 실행한다.
+Native는 25/50/75%에서 두 필드의 CPU 기억을 snapshot으로 꺼내 SQLite의 native_memory BLOB에 원점수와 한 transaction으로 보존한다.
+이어하기에서는 이 기준을 재사용한다. 유실되면 Native를 다시 실행해 조용히 기준을 바꾸지 않고 오류를 낸다.
+원점수와 기억을 담은 DB를 함께 보존한다.
 Native tensor snapshot 때문에 CPU RAM과 디스크 사용량이 늘어난다. tensor dtype/기억 칸 수에 따라 달라지며,
-(1,64,64,64) BF16 feature 하나는 약 0.5 MiB이다. 같은 회차에 두 전환 snapshot을 저장한다.
+(1,64,64,64) BF16 feature 하나는 약 0.5 MiB이다. 같은 회차에 세 전환 snapshot을 저장한다.
 준비된 Target의 전체 tensor는 별도 파일로 저장하지 않고 프레임별 R² 및 충분통계량만 기록한다.
-버전 3 원점수에는 기억 snapshot이 없으므로 R²을 소급 계산할 수 없다. 기존 파일은 보존하며 버전 4 평가 결과와 섞지 않는다.
+버전 3 원점수에는 기억 snapshot이 없으므로 R²을 소급 계산할 수 없다. 기존 파일은 보존하며 현재 버전 5 평가 결과와 섞지 않는다.
 
 ### 전환시간(초)
 
@@ -229,17 +231,16 @@ J_Recall = (J > 50인 대상 프레임 수) ÷ (대상 프레임 수).
 
 ## 결과 저장과 이어하기
 
-결과 버전은 `evaluation_revision = 4`이며 방법별 `baseline_revision`을 함께 저장한다.
+결과 버전은 `evaluation_revision = 5`이며 방법별 `baseline_revision`을 함께 저장한다.
 이전 결과는 삭제하지 않지만 새 회복률/반복 통계와 섞지 않는다.
-객체 기준 50/75% 영상 목록의 버전은 2로 유지하여 기존 목록을 재사용한다.
+객체 기준 25/50/75% 영상 목록의 버전은 3이다. 기존 50/75% 목록은 다시 만든다.
 Original + Last-Visible의 방법 버전은 2, 나머지는 1이다.
 
-- `outputs/records/<dataset>.run<r>[.shard<i>of<n>].jsonl`: 회차별 결과.
-- `outputs/native/<dataset>.run<r>[.shard<i>of<n>].jsonl`: 회차별 Native 기준 원점수와 전환 비용.
-- `outputs/native_memory/<native_reference_id>.pt`: 같은 Native 회차의 전환 시점 기억 기준(두 필드의 CPU tensor).
+- `OUTPUT_ROOT/benchmark.sqlite3`: 회차별 결과·프레임 점수·Native 원점수·전환 비용·기억 tensor의 원본.
+- 기존 `records`/`native` JSONL와 `native_memory` .pt는 자동 이관 후에도 그대로 보존한다.
 - Native 기준은 생성 즉시 먼저 저장한다. 이어하기에서는 원래 기준을 재사용한다.
 - Native 파일이 유실되었는데 해당 회차 결과가 남아 있다면 새 분모를 섞지 않고 오류를 낸다.
-- records/native/native_memory 세 폴더를 함께 보존한다. 같은 조건을 여러 작업에 동시에 맡기지 않는다.
+- DB를 보존한다. 같은 조건을 여러 작업에 동시에 맡기지 않는다.
 
 이어하기 키는 반복 번호·seed·영상·객체·전환 이름·실제 전환 프레임·방법이다.
 각 회차는 다른 회차의 완료 기록에 의해 건너뛰지 않는다. 일부 전환만 빠진 경우 누락된 줄만 추가한다.
@@ -262,8 +263,8 @@ GPU 분할은 기존 `--shard i/n`을 사용한다.
 - `summary.csv`: 같은 조건의 반복 평균·표준편차·분산·유효 회차 수.
 
 위 CSV/Markdown은 `outputs/tables/`에 저장하며 마지막 집계로 갱신된다.
-재계산한 회복률 JSONL은 `outputs/analysis/recovery.seed<S>.runs<N>.<median|mean>.ratio_of_means.jsonl`에 정의별로 보존한다.
-원본 records/native는 집계에서 변경하지 않는다.
+재계산한 회복률은 DB의 analysis_rows에 정의별로 보존하고 `outputs/analysis/recovery.seed<S>.runs<N>.<median|mean>.ratio_of_means.jsonl`로 내보낸다.
+DB의 추론 원본은 집계에서 변경하지 않는다.
 `temporal.csv`의 native_j/native_jf는 반복 기준, native_run_j/native_run_jf는 실제 회차 Native 점수이다. `3_make_tables.py --runs N --seed S`로 1~N회/seed를 선택한다.
 전환 전 곡선의 `frames_after_switch`는 0 이하, `phase=pre`이며 전환 후는 양수, `phase=post`이다.
 점수는 100점 척도, 회복률/실패비율은 %, 전환시간은 초, GPU 메모리는 MiB이다.

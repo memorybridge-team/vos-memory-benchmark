@@ -51,6 +51,15 @@ def load_video_list(name: str) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     if (data.get("evaluation_revision") != settings.VIDEO_LIST_REVISION
             or data.get("switch_basis") != "object"
-            or data.get("switch_fractions") != list(settings.SWITCH_FRACTIONS)):
+            or data.get("switch_fractions") != list(settings.SWITCH_FRACTIONS)
+            or data.get('exclude_if_pre_switch_frames_lte') != settings.MIN_TRACK_FRAMES
+            or data.get('exclusion_scope') != 'all_switches_methods_runs'):
         raise ValueError(f"{path}의 평가 기준이 오래되었습니다. scripts/1_make_video_list.py를 다시 실행하세요.")
+    from evaluation.switches import object_exclusion
+    for entry in data['videos']:
+        for obj in entry['objects']:
+            reason = object_exclusion(obj)
+            if reason is not None:
+                raise ValueError(f"{entry['video']} 객체 {obj['object']}는 전체 평가 제외 대상입니다: {reason}. "
+                                 "scripts/1_make_video_list.py를 다시 실행하세요.")
     return data

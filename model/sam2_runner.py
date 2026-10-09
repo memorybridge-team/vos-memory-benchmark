@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,18 +77,53 @@ class LazyFrames:
     MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
     STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
-    def __init__(self, paths, image_size: int):
+    def __init__(self, paths, image_size: int, prefetch=None):
         self.paths = list(paths)
         self.image_size = image_size
+        self.prefetch = settings.FRAME_PREFETCH if prefetch is None else prefetch
+        if self.prefetch < 0:
+            raise ValueError('prefetch는 0 이상이어야 합니다.')
+        self._executor = (ThreadPoolExecutor(max_workers=1, thread_name_prefix='vos-frame')
+                          if self.prefetch else None)
+        self._pending = {}
+        self._closed = False
 
     def __len__(self):
         return len(self.paths)
 
-    def __getitem__(self, i):
+    def _decode(self, i):
         with Image.open(self.paths[i]) as im:
             im = im.convert("RGB").resize((self.image_size, self.image_size))
             x = torch.from_numpy(np.asarray(im, dtype=np.float32) / 255.0).permute(2, 0, 1)
         return (x - self.MEAN) / self.STD
+
+
+    def __getitem__(self, i):
+        if self._closed:
+            raise RuntimeError('이미 닫힌 영상입니다.')
+        if i < 0:
+            i += len(self.paths)
+        if not 0 <= i < len(self.paths):
+            raise IndexError(i)
+        if self._executor is None:
+            return self._decode(i)
+        # GPU를 건드리지 않는 CPU worker 하나. 순차 접근은 다음 두 장을 미리 준비한다.
+        wanted = range(i,min(len(self.paths),i+self.prefetch+1))
+        for frame in list(self._pending):
+            if frame not in wanted:
+                self._pending.pop(frame).cancel()
+        for frame in wanted:
+            if frame not in self._pending:
+                self._pending[frame] = self._executor.submit(self._decode,frame)
+        return self._pending.pop(i).result()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self._executor is not None:
+            self._executor.shutdown(wait=True,cancel_futures=True)
+        self._pending.clear()
 
 
 def _copy_to(x, device):
@@ -106,6 +142,7 @@ class Session:
 
         self.predictor = runner.predictor
         frames = LazyFrames(video.frame_paths, self.predictor.image_size)
+        self._frames = frames
         height, width = video.size
         # init_state 가 프레임을 전부 읽지 않도록, 읽는 함수만 잠깐 바꿔 끼운다.
         original = svp.load_video_frames
@@ -116,10 +153,17 @@ class Session:
                     video_path=str(video.frame_paths[0].parent),
                     offload_video_to_cpu=True,
                     offload_state_to_cpu=settings.OFFLOAD_STATE_TO_CPU)
+        except BaseException:
+            frames.close()
+            raise
         finally:
             svp.load_video_frames = original
-        with self._context():
-            self.obj_idx = self.predictor._obj_id_to_idx(self.state, OBJ_ID)
+        try:
+            with self._context():
+                self.obj_idx = self.predictor._obj_id_to_idx(self.state, OBJ_ID)
+        except BaseException:
+            self.close()
+            raise
 
     # ── 기본 동작 ──────────────────────────────────────────────────────
     @contextmanager
@@ -165,6 +209,7 @@ class Session:
 
     def close(self) -> None:
         self.state = None
+        self._frames.close()
 
     # ── 기억 ──────────────────────────────────────────────────────────
     def memory_of(self, frame: int) -> dict | None:

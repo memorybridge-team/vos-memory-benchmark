@@ -1,8 +1,7 @@
-"""결과 한 줄씩 저장 (JSON Lines), 중단 후 이어하기.
+"""조건 키·현재 평가 모집단 검증과 이전 JSONL import/export 보조 함수.
 
-줄 하나 = (반복 번호, seed, 영상, 객체, 전환 시점, 방법) 하나. 파일: outputs/records/<데이터셋>[.shard].jsonl
-(예전에 따로 돌린 <데이터셋>.model.jsonl · .baselines.jsonl 도 같이 읽는다)
-객체 하나의 줄들은 다 만든 뒤 한꺼번에 쓴다 → 중간에 끊기면 그 객체만 다시 돌리면 된다.
+평가 원본은 store.py의 SQLite에 저장한다. JSONL은 이전 파일 읽기와 분석 export에 쓴다.
+객체 전체 결과는 하나의 DB transaction으로 확정하므로 중단 시 일부만 완료되지 않는다.
 """
 
 from __future__ import annotations
@@ -74,14 +73,9 @@ def row_key(row: dict) -> tuple:
 
 def done_keys(dataset: str, *, videos=None, run_ids=None, seed=None) -> set[tuple]:
     """현재 정의로 끝난 결과 줄. 일부 전환만 완료된 방법도 나머지는 이어서 계산한다."""
-    folder = records_path(dataset).parent
-    selected = None if videos is None else set(videos)
-    runs = None if run_ids is None else set(run_ids)
-    return {row_key(r) for path in folder.glob(f"{dataset}*.jsonl")
-            for r in iter_current_rows(iter_rows(path))
-            if (selected is None or r['video'] in selected)
-            and (runs is None or r['run_id'] in runs)
-            and (seed is None or r['seed'] == seed)}
+    from evaluation import store
+    store.import_legacy(dataset)
+    return store.done_keys(dataset, videos=videos, run_ids=run_ids, seed=seed)
 
 
 def current_rows(rows: list[dict]) -> list[dict]:
@@ -92,16 +86,23 @@ def current_rows(rows: list[dict]) -> list[dict]:
 def iter_current_rows(rows):
     from evaluation.methods import METHODS
 
+    from evaluation.switches import object_exclusion, switch_points
     revisions = {m.name: m.revision for m in METHODS}
     switches = {str(round(f * 100)) for f in settings.SWITCH_FRACTIONS}
-    return (r for r in rows
-            if r.get("evaluation_revision") == settings.EVALUATION_REVISION
-            and type(r.get("run_id")) is int and r["run_id"] > 0
-            and type(r.get("seed")) is int
-            and r.get("native_reference_id")
-            and r["switch_name"] in switches
-            and r["baseline"] in revisions
-            and r.get("baseline_revision", 1) == revisions[r["baseline"]])
+    for r in rows:
+        if not (r.get('evaluation_revision') == settings.EVALUATION_REVISION
+                and type(r.get('run_id')) is int and r['run_id'] > 0
+                and type(r.get('seed')) is int and r.get('native_reference_id')
+                and r.get('switch_name') in switches and r.get('baseline') in revisions
+                and r.get('baseline_revision',1) == revisions[r['baseline']]
+                and type(r.get('start')) is int and type(r.get('end')) is int):
+            continue
+        obj = {'start':r['start'],'end':r['end'],'switches':switch_points(r['start'],r['end'])}
+        if object_exclusion(obj) is not None:
+            continue
+        if {'name':r['switch_name'],'frame':r['switch_frame']} not in obj['switches']:
+            continue
+        yield r
 
 
 def unique_rows(rows: list[dict]) -> list[dict]:

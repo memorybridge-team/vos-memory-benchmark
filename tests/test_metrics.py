@@ -57,8 +57,8 @@ def test_metrics():
     run.times = {9: 100.0}
     assert cost.cost_columns(run, 8)["switch_seconds"] == 2.0
 
-    assert settings.SWITCH_FRACTIONS == (0.5, 0.75)
-    assert switch_points(5, 29) == [{"name": "50", "frame": 17}, {"name": "75", "frame": 23}]
+    assert settings.SWITCH_FRACTIONS == (0.25, 0.5, 0.75)
+    assert switch_points(5, 29) == [{"name": "25", "frame": 11}, {"name": "50", "frame": 17}, {"name": "75", "frame": 23}]
     # 한 영상에 객체가 많아도 영상의 가중치는 동일하다. 가시성이 없는 시간점은 섞지 않는다.
     from evaluation.tables import temporal
     rows = [
@@ -75,7 +75,7 @@ def test_metrics():
     assert points[0]["video_count"] == 2 and points[0]["object_count"] == 3
     assert [p["frames_after_switch"] for p in points] == [1, 3]
     assert points[1]["j"] == 40.0 and points[1]["video_count"] == 1
-    print("OK: J·F·J&F, 엄격한 J > 0.5, 전환 비용 경계, 50/75%, 경과 프레임 집계")
+    print("OK: J·F·J&F, 엄격한 J > 0.5, 전환 비용 경계, 25/50/75%, 경과 프레임 집계")
 
 
 if __name__ == "__main__":
