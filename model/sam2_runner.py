@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,6 +62,11 @@ class SAM2Runner:
         self.name = model_key
         self.predictor = build_sam2_video_predictor(cfg["config"], checkpoint,
                                                     device=settings.DEVICE)
+        from model.sam2_check import window_is_enough
+        if not window_is_enough({"num_maskmem": self.predictor.num_maskmem,
+                                "max_obj_ptrs_in_encoder": self.predictor.max_obj_ptrs_in_encoder,
+                                "memory_temporal_stride_for_eval": self.predictor.memory_temporal_stride_for_eval}):
+            raise ValueError("MEMORY_WINDOW가 설치된 SAM2의 기억 조회 범위보다 짧습니다.")
 
     def start(self, video) -> "Session":
         return Session(self, video)
@@ -79,15 +85,48 @@ class LazyFrames:
     def __init__(self, paths, image_size: int):
         self.paths = list(paths)
         self.image_size = image_size
+        self._executor = None
+        self._pending = None
+        self._after = None
+        self._last = -1
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, i):
+        if self._pending is not None:
+            frame, future = self._pending
+            self._pending = None
+            if frame == i:
+                x = future.result()
+            else:
+                # 이전 작업이 측정 프레임의 I/O와 겹치지 않도록 먼저 끝낸다.
+                future.result()
+                x = self._read(i)
+        else:
+            x = self._read(i)
+        if self._executor is not None and self._after < i < self._last:
+            self._pending = (i + 1, self._executor.submit(self._read, i + 1))
+        return x
+
+    def _read(self, i):
+        # 이 worker는 CPU 이미지 준비만 한다. CUDA와 SAM2 상태에는 접근하지 않는다.
         with Image.open(self.paths[i]) as im:
             im = im.convert("RGB").resize((self.image_size, self.image_size))
             x = torch.from_numpy(np.asarray(im, dtype=np.float32) / 255.0).permute(2, 0, 1)
         return (x - self.MEAN) / self.STD
+
+    def configure_prefetch(self, measure_through, last):
+        """측정 마지막 프레임 뒤에서만 다음 한 장을 준비한다."""
+        self.close()
+        self._after, self._last = measure_through, last
+        if settings.PREFETCH_FRAMES and last > measure_through:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='vos-frame')
+
+    def close(self):
+        if self._executor is not None:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+        self._executor, self._pending = None, None
 
 
 def _copy_to(x, device):
@@ -106,6 +145,7 @@ class Session:
 
         self.predictor = runner.predictor
         frames = LazyFrames(video.frame_paths, self.predictor.image_size)
+        self.frames = frames
         height, width = video.size
         # init_state 가 프레임을 전부 읽지 않도록, 읽는 함수만 잠깐 바꿔 끼운다.
         original = svp.load_video_frames
@@ -163,7 +203,11 @@ class Session:
                 self._forget_old(frame)
             yield FrameOut(frame, mask, visible)
 
+    def configure_prefetch(self, measure_through: int, last: int):
+        self.frames.configure_prefetch(measure_through, last)
+
     def close(self) -> None:
+        self.frames.close()
         self.state = None
 
     # ── 기억 ──────────────────────────────────────────────────────────

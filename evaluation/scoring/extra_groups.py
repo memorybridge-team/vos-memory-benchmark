@@ -2,7 +2,7 @@
 
 공식 라벨
   data/<데이터셋>.py 의 load_labels() 가 읽고, 1_make_video_list.py 가 목록의 객체마다
-  "extra_labels" 로 적어 둔다. 표(tables/extra_tables.py)는 목록에서 라벨을 꺼내 쓴다.
+  "extra_labels" 로 적어 둔다. 추론 결과에 라벨을 고정하고 표는 결과의 라벨을 사용한다.
       lvos_v2  영상 속성 13종 (예: "OCC 가림")                       영상 단위  (따로 받은 valid/val_meta_attribute.json)
       m3vos    상태 변화 종류 / 변하기 전→후 (예: "상태 변화:separate")  객체 단위
       vost     영상 이름의 동작 (예: "변형:break")                    영상 단위

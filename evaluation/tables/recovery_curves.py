@@ -85,7 +85,7 @@ def build(rows, video_lists=None, run_ids=None, methods=None):
         window = dict(dataset=dataset, switch_name=switch_name, window_n=n,
                       relative_frame_min=-n, relative_frame_max=n,
                       zero_definition='last_pre_switch_frame',
-                      window_basis='planned_object_ranges' if video_list is not None else 'recorded_object_ranges',
+                      window_basis=video_list.get('window_basis', 'planned_object_ranges') if video_list is not None else 'recorded_object_ranges',
                       run_ids=list(run_ids), methods=list(methods),
                       planned_video_count=len({case[0] for case in planned}), planned_object_count=len(planned),
                       cohort_video_count=len({case[0] for case in complete}), cohort_object_count=len(complete),

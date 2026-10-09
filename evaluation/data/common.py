@@ -95,10 +95,13 @@ def _natural_key(path: Path):
 
 def videos_from_folders(dataset: str, frames_root: Path, masks_root: Path, *,
                         names: list[str] | None = None,
-                        ignore_value: int | None = None) -> list[Video]:
+                        ignore_value: int | None = None,
+                        require_all_masks: bool = True) -> list[Video]:
     """frames_root/<영상>/<프레임>.jpg 와 masks_root/<영상>/<프레임>.png 구조를 읽는다.
 
     프레임과 정답은 파일 이름(확장자 뺀 것)이 같으면 짝이 된다.
+    연결되지 않은 정답과 중복 프레임은 오류다. 기본값은 모든 프레임의 정답을 요구한다.
+    희소 정답 데이터는 require_all_masks=False를 명시한다.
     """
     frames_root, masks_root = Path(frames_root), Path(masks_root)
     if names is None:
@@ -108,12 +111,24 @@ def videos_from_folders(dataset: str, frames_root: Path, masks_root: Path, *,
         frames = sorted((p for p in (frames_root / name).iterdir()
                          if p.suffix.lower() in FRAME_EXTENSIONS), key=_natural_key)
         index = {p.stem: i for i, p in enumerate(frames)}
+        if not frames or len(index) != len(frames):
+            raise ValueError(f"{dataset}/{name}: 프레임이 없거나 파일 이름이 중복됩니다.")
         masks = {}
         mask_dir = masks_root / name
+        unmatched = []
         if mask_dir.is_dir():
-            for p in mask_dir.glob("*.png"):
+            for p in sorted(mask_dir.glob("*.png")):
                 if p.stem in index:
                     masks[index[p.stem]] = p
+                else:
+                    unmatched.append(p.name)
+        missing = [p.name for i, p in enumerate(frames) if i not in masks]
+        if unmatched or (require_all_masks and missing):
+            raise ValueError(
+                f"{dataset}/{name}: 프레임·정답 파일 이름 불일치 또는 정답 누락. "
+                f"연결 안 된 정답 {len(unmatched)}개 {unmatched[:5]}, "
+                f"정답 없는 프레임 {len(missing)}개 {missing[:5]}. "
+                "파일 이름의 자릿수와 데이터 경로를 확인하세요.")
         videos.append(Video(dataset, name, frames, masks, ignore_value))
     return videos
 

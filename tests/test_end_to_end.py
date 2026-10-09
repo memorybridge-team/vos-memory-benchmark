@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import settings
 import translator
 from baseline import MAIN
-from evaluation import native, records
+from evaluation import native, records, store
 from evaluation.data import DATASETS, load_dataset, load_video_list, video_list_path
 from evaluation.methods import METHODS, to_run
 from evaluation.scoring.recovery import ratio
@@ -42,19 +42,19 @@ def setup(tmp: Path) -> None:
     settings.OUTPUT_ROOT = str(tmp / "outputs")
     fake_data.make_all(Path(settings.DATA_ROOT), settings.DATA_FOLDERS)
     sam2_runner.load_runner = fake_sam2.FakeRunner
+    # 가짜 SAM2 테스트는 실제 체크포인트 검사를 대체하지 않는다.
+    sam2_check.require_passed = lambda: None
     translator.load = lambda: setattr(translator, "_translator", fake_sam2.FakeTranslator())
 
 
 def dataset_rows(dataset: str) -> list[dict]:
-    return [r for path in sorted(records.records_path(dataset).parent.glob(f"{dataset}*.jsonl"))
-            for r in records.read_rows(path)]
+    return store.read_results(dataset, visible_only=True)
 
 
 def keep_only_model(dataset):
-    for path in sorted(records.records_path(dataset).parent.glob(f'{dataset}.run*.jsonl')):
-        rows = [r for r in records.read_rows(path) if r['baseline'] in ('translator', 'source_only', 'full_replay')]
-        path.unlink()
-        records.append_rows(path.with_name(path.stem + '.model.jsonl'), rows)
+    with store.connect() as conn:
+        conn.execute("DELETE FROM results WHERE dataset=? AND baseline NOT IN ('translator','source_only','full_replay')", (dataset,))
+
 
 def check_rows(dataset: str) -> None:
     raw = dataset_rows(dataset)
@@ -81,6 +81,7 @@ def check_rows(dataset: str) -> None:
     for row in rows:
         assert not REMOVED_COLUMNS.intersection(row)
         assert row["evaluation_revision"] == settings.EVALUATION_REVISION
+        assert 'extra_labels' in row
         assert row["jf"] is not None and row["n_frames"] > 0
         assert 0 <= row["failure_rate"] <= 1
         assert row["n_frames"] == len(row["frame_scores"])
@@ -165,7 +166,7 @@ def check_tables() -> None:
         assert f"| {method.label} |" in main and f"| {method.label} |" in difficulty
     for column in ("전환 전 회복률 J", "전환 전 회복률 J&F", "전환 후 회복률 J", "전환 후 회복률 J&F", "전환시간(초)", "전환 GPU 메모리(MB)", "실패 비율(%)", "복원율 R² (spatial)", "복원율 R² (pointer)", "R² 유효 객체"):
         assert column in main
-    for gone in ("출력 일치도", "진단 비교군", "25%", "R^2", "복원율(", "전체 추적시간"):
+    for gone in ("출력 일치도", "진단 비교군", "R^2", "복원율(", "전체 추적시간"):
         assert gone not in main + difficulty
     assert "### 전환 50%" in main and "### 전환 75%" in main
     for label in ("OCC 가림", "FM 빠른 움직임", "변형:break", "상태 변화:melt", "상태:solid→liquid"):
@@ -187,6 +188,8 @@ def check_tables() -> None:
         assert result
         for metric in ('pre_recovery_j', 'pre_recovery_jf', 'post_recovery_j', 'post_recovery_jf'):
             assert all(r[metric + ('_mean' if name == 'summary.csv' else '')] != '' for r in result)
+        if name == 'per_run.csv':
+            assert all('r2_obj_ptr_object_count' in r and 'pre_recovery_j_video_count' in r for r in result)
         if name == 'summary.csv':
             assert all(int(r['j_run_count']) == 3 and float(r['j_std']) == 0 for r in result)
         else:
@@ -206,17 +209,17 @@ def check_tables() -> None:
         reference = list(csv.DictReader(stream))
     assert reference and all(r['native_statistic'] == 'median' and int(r['native_reference_count']) == 3 for r in reference)
     assert all(r['native_reference_ready'] == 'True' for r in reference)
-    snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*.median.ratio_of_means.jsonl'))
+    snapshots = list((Path(settings.OUTPUT_ROOT) / 'analysis').glob('*/*.median.ratio_of_means.jsonl'))
     assert snapshots and all(r['recovery_reference'] == 'native_median' for r in records.read_rows(snapshots[0]))
     with (tables / 'recovery_common_window.csv').open(encoding='utf-8-sig', newline='') as stream:
         curves = list(csv.DictReader(stream))
     assert curves and {p['switch_name'] for p in curves} == {'50', '75'}
     assert {p['baseline'] for p in curves} == {m.name for m in METHODS}
-    figure_dir = Path(settings.OUTPUT_ROOT) / 'figures' / 'recovery_common.seed0.runs3.median'
+    figure_dir = Path(settings.OUTPUT_ROOT) / 'figures' / store.select_experiment()['experiment_id'] / 'recovery_common.seed0.runs3.median'
     windows = json.loads((figure_dir / 'windows.json').read_text(encoding='utf-8'))
     assert len(windows) == len(DATASETS) * 2
     for window in windows:
-        assert window['status'] == 'ok' and window['window_basis'] == 'planned_object_ranges'
+        assert window['status'] == 'ok' and window['window_basis'] == 'stored_native_object_ranges'
         assert window['cohort_object_count'] == window['planned_object_count']
         chosen = [p for p in curves if p['dataset'] == window['dataset'] and p['switch_name'] == window['switch_name']]
         assert {int(p['frames_after_switch']) for p in chosen} == set(range(-window['window_n'], window['window_n'] + 1))
@@ -237,6 +240,7 @@ def check_legacy_results(dataset: str) -> None:
         dict(source, baseline="reset", role="extra"),
         dict(source, switch_name="25"),
         dict(source, evaluation_revision=2),
+        dict(source, evaluation_revision=4),
         {k: v for k, v in source.items() if k != 'run_id'},
     ]
     assert records.current_rows(incompatible) == []
@@ -250,11 +254,10 @@ def check_legacy_results(dataset: str) -> None:
 
 
 def check_partial_resume(dataset):
-    path = records.records_path(dataset).with_name(f'{dataset}.run2.jsonl')
-    rows = records.read_rows(path)
+    rows = [r for r in dataset_rows(dataset) if r['run_id'] == 2]
     missing = next(r for r in rows if r['baseline'] == 'translator' and r['switch_name'] == '75')
-    path.unlink()
-    records.append_rows(path, [r for r in rows if r is not missing])
+    with store.connect() as conn:
+        conn.execute('DELETE FROM results WHERE result_id=?', (missing['result_id'],))
     old_track = fake_sam2.FakeSession.track
     old_export = fake_sam2.FakeSession.export_memory
     tracked, exported = [], []
@@ -277,7 +280,7 @@ def check_partial_resume(dataset):
     finally:
         fake_sam2.FakeSession.track = old_track
         fake_sam2.FakeSession.export_memory = old_export
-    completed = records.read_rows(path)
+    completed = [r for r in dataset_rows(dataset) if r['run_id'] == 2]
     assert len(completed) == len(rows)
     assert len(records.unique_rows(completed)) == len(completed)
     restored = next(r for r in completed if records.row_key(r) == records.row_key(missing))
@@ -295,7 +298,7 @@ def check_old_list_rejected(dataset: str) -> None:
     path = video_list_path(dataset)
     original = path.read_text(encoding="utf-8")
     data = json.loads(original)
-    data["switch_fractions"] = [0.25, 0.5, 0.75]
+    data["switch_fractions"] = [0.5, 0.75]
     path.write_text(json.dumps(data), encoding="utf-8")
     try:
         load_video_list(dataset)
@@ -423,11 +426,19 @@ def test_end_to_end():
         check_legacy_results("vost_val")
         check_old_list_rejected("m3vos")
         raw_before = {d: dataset_rows(d) for d in DATASETS}
+        # 추론 뒤 목록의 라벨을 바꾸어도 기존 extra 표는 원래 라벨을 사용한다.
+        path = video_list_path('vost_val')
+        changed_list = json.loads(path.read_text())
+        for video in changed_list['videos']:
+            for obj in video['objects']:
+                obj['extra_labels'] = ['changed_after_inference']
+        path.write_text(json.dumps(changed_list))
         run_script('3_make_tables.py', '--native-statistic', 'mean')
-        assert (Path(settings.OUTPUT_ROOT) / 'analysis' / 'recovery.seed0.runs3.mean.ratio_of_means.jsonl').exists()
+        assert (Path(settings.OUTPUT_ROOT) / 'analysis' / store.select_experiment()['experiment_id'] / 'recovery.seed0.runs3.mean.ratio_of_means.jsonl').exists()
         run_script("3_make_tables.py")
         assert all(dataset_rows(d) == raw_before[d] for d in DATASETS)
         check_tables()
+        assert 'changed_after_inference' not in (Path(settings.OUTPUT_ROOT) / 'tables/extra.md').read_text()
         check_roundtrip()
         print("모두 통과")
     finally:

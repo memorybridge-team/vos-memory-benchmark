@@ -58,7 +58,8 @@ def build(groups: dict, object_labels: dict) -> list[str]:
     out = ["# 난이도 유형별 성능\n",
            "영상·객체 전체의 라벨 기준이며 전환 뒤에 해당 사건이 발생했는지는 구분하지 않는다.",
            "전환 전/후 회복률은 객체별 구간 평균 점수 / 같은 프레임 Native 기준 평균 × 100이다.",
-           "전환 전 Small 예측은 방법 간 공통이며, Native 행은 자체 예측이다.\n"]
+           "라벨은 추론 결과에 저장된 값을 사용한다. 목록을 바꾸어도 기존 결과의 분류는 바뀌지 않는다.",
+           "전환 전 Small 예측은 방법 간 공통이며 독립적인 방법 비교가 아니다. 처음 프롬프트 프레임을 포함하고 Native 행은 자체 예측이다.\n"]
     for dataset, rows in groups.items():
         out += [f"## {dataset} 공식 라벨\n"] + switch_sections(rows, raw_labels)
 

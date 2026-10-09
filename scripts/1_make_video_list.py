@@ -40,13 +40,15 @@ def make_list(dataset: str) -> dict:
         objects = []
         for obj_id, visible in scan_visibility(video).items():
             start = min(f for f, v in visible.items() if v)
-            if end - start < settings.MIN_TRACK_FRAMES:
+            switches = switch_points(start, end)
+            if not switches:
                 skipped += 1
                 continue
             objects.append({"object": obj_id, "start": start, "end": end,
-                            "switches": switch_points(start, end),
+                            "switches": switches,
                             "extra_labels": labels_of(labels, video.name, obj_id)})
-        entries.append({"video": video.name, "num_frames": video.num_frames, "objects": objects})
+        if objects:
+            entries.append({"video": video.name, "num_frames": video.num_frames, "objects": objects})
         if i % 50 == 0 or i == len(videos):
             print(f"  {dataset}: {i}/{len(videos)}")
     return {"dataset": dataset, "evaluation_revision": settings.VIDEO_LIST_REVISION,

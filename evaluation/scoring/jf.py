@@ -38,8 +38,8 @@ def j_score(pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray | None = None) 
     return float(np.logical_and(pred, gt).sum() / union)
 
 
-def _boundary(mask: np.ndarray) -> np.ndarray:
-    """마스크의 경계 픽셀 (DAVIS seg2bmap 과 같음)."""
+def _boundary(mask: np.ndarray, ignore: np.ndarray | None = None) -> np.ndarray:
+    """DAVIS seg2bmap 경계. 무시 픽셀이 포함된 비교는 채점에서 제외한다."""
     e = np.zeros_like(mask)
     s = np.zeros_like(mask)
     se = np.zeros_like(mask)
@@ -50,13 +50,20 @@ def _boundary(mask: np.ndarray) -> np.ndarray:
     b[-1, :] = mask[-1, :] ^ e[-1, :]
     b[:, -1] = mask[:, -1] ^ s[:, -1]
     b[-1, -1] = False
+    if ignore is not None:
+        valid = ~ignore
+        comparisons = valid.copy()
+        comparisons[:-1, :-1] &= (valid[:-1, 1:] & valid[1:, :-1] & valid[1:, 1:])
+        comparisons[-1, :-1] &= valid[-1, 1:]
+        comparisons[:-1, -1] &= valid[1:, -1]
+        b &= comparisons
     return b
 
 
 def f_score(pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray | None = None) -> float:
     pred, gt = _keep(pred, ignore), _keep(gt, ignore)
     threshold = settings.BOUNDARY_THRESHOLD * np.hypot(*pred.shape)
-    pred_b, gt_b = _boundary(pred), _boundary(gt)
+    pred_b, gt_b = _boundary(pred, ignore), _boundary(gt, ignore)
     n_pred, n_gt = pred_b.sum(), gt_b.sum()
     if n_pred == 0 and n_gt == 0:
         return 1.0

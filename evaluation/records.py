@@ -1,8 +1,6 @@
-"""결과 한 줄씩 저장 (JSON Lines), 중단 후 이어하기.
+"""SQLite 완료 키/현재 평가 필터와 과거 JSONL·분석 내보내기 도구.
 
-줄 하나 = (반복 번호, seed, 영상, 객체, 전환 시점, 방법) 하나. 파일: outputs/records/<데이터셋>[.shard].jsonl
-(예전에 따로 돌린 <데이터셋>.model.jsonl · .baselines.jsonl 도 같이 읽는다)
-객체 하나의 줄들은 다 만든 뒤 한꺼번에 쓴다 → 중간에 끊기면 그 객체만 다시 돌리면 된다.
+새 추론 결과와 Native는 store.py에 저장한다. JSONL 파일은 재개에서 읽지 않는다.
 """
 
 from __future__ import annotations
@@ -74,34 +72,37 @@ def row_key(row: dict) -> tuple:
 
 def done_keys(dataset: str, *, videos=None, run_ids=None, seed=None) -> set[tuple]:
     """현재 정의로 끝난 결과 줄. 일부 전환만 완료된 방법도 나머지는 이어서 계산한다."""
-    folder = records_path(dataset).parent
-    selected = None if videos is None else set(videos)
-    runs = None if run_ids is None else set(run_ids)
-    return {row_key(r) for path in folder.glob(f"{dataset}*.jsonl")
-            for r in iter_current_rows(iter_rows(path))
-            if (selected is None or r['video'] in selected)
-            and (runs is None or r['run_id'] in runs)
-            and (seed is None or r['seed'] == seed)}
+    from evaluation.store import done_keys as database_done_keys
+    return database_done_keys(dataset, videos=videos, run_ids=run_ids, seed=seed)
 
 
-def current_rows(rows: list[dict]) -> list[dict]:
+def current_rows(rows: list[dict], *, configuration=None, revisions=None) -> list[dict]:
     """현재 평가 버전, 전환 시점, 방법 실행 정의에 맞는 결과만 고른다."""
-    return list(iter_current_rows(rows))
+    return list(iter_current_rows(rows, configuration=configuration, revisions=revisions))
 
 
-def iter_current_rows(rows):
+def iter_current_rows(rows, *, configuration=None, revisions=None):
     from evaluation.methods import METHODS
 
-    revisions = {m.name: m.revision for m in METHODS}
-    switches = {str(round(f * 100)) for f in settings.SWITCH_FRACTIONS}
+    revisions = {m.name: m.revision for m in METHODS} if revisions is None else revisions
+    evaluation_revision = settings.EVALUATION_REVISION if configuration is None else configuration['evaluation_revision']
+    fractions = settings.SWITCH_FRACTIONS if configuration is None else configuration['switch_fractions']
+    minimum = settings.MIN_PRE_SWITCH_FRAMES if configuration is None else configuration['min_pre_switch_frames']
+    from evaluation.switches import switch_points
+    def eligible(row):
+        return (row['switch_name'], row['switch_frame']) in {
+            (s['name'], s['frame']) for s in switch_points(row['start'], row['end'],
+                                                        fractions=fractions, min_pre_frames=minimum)}
+    switches = {str(round(f * 100)) for f in fractions}
     return (r for r in rows
-            if r.get("evaluation_revision") == settings.EVALUATION_REVISION
+            if r.get("evaluation_revision") == evaluation_revision
             and type(r.get("run_id")) is int and r["run_id"] > 0
             and type(r.get("seed")) is int
             and r.get("native_reference_id")
             and r["switch_name"] in switches
             and r["baseline"] in revisions
-            and r.get("baseline_revision", 1) == revisions[r["baseline"]])
+            and r.get("baseline_revision", 1) == revisions[r["baseline"]]
+            and eligible(r))
 
 
 def unique_rows(rows: list[dict]) -> list[dict]:

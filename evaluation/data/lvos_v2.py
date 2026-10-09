@@ -13,6 +13,8 @@
 
 import json
 
+import settings
+
 from evaluation.data.common import dataset_root, print_first_video, videos_from_folders
 
 IGNORE_VALUE = None
@@ -22,10 +24,17 @@ SPLIT_FOLDERS = {"valid": ("val", "valid")}   # 우리 이름 → 실제 폴더 
 
 def _split_root(split: str):
     base = dataset_root("lvos_v2")
-    for name in SPLIT_FOLDERS[split]:
-        if (base / name).is_dir():
-            return base / name
-    return base / SPLIT_FOLDERS[split][0]
+    selected = settings.LVOS_SPLIT_FOLDER
+    if selected is not None:
+        if selected not in SPLIT_FOLDERS[split] or not (base / selected).is_dir():
+            raise ValueError(f"LVOS_SPLIT_FOLDER가 유효하지 않습니다: {selected}")
+        return base / selected
+    roots = [base / name for name in SPLIT_FOLDERS[split] if (base / name).is_dir()]
+    if len(roots) > 1:
+        raise ValueError("LVOS에 val/valid가 모두 있습니다. settings.LVOS_SPLIT_FOLDER를 지정하세요.")
+    if not roots:
+        raise FileNotFoundError(f"LVOS 검증 폴더가 없습니다: {base}")
+    return roots[0]
 
 # 공식 영상 속성 13종 (LVOS 논문 Table II)
 ATTRIBUTES = {
@@ -52,7 +61,15 @@ def load_labels(split: str) -> dict:
     파일이 없으면 빈 결과 → LVOS 라벨 표는 "(없음)", 합친 표에서 LVOS 몫이 빠짐.
     """
     root = _split_root(split)
-    files = sorted(root.glob("*attribute*.json")) if root.is_dir() else []
+    if settings.LVOS_ATTRIBUTE_FILE is not None:
+        selected = root / settings.LVOS_ATTRIBUTE_FILE
+        if selected.parent != root or not selected.is_file():
+            raise ValueError(f"LVOS_ATTRIBUTE_FILE가 유효하지 않습니다: {selected}")
+        files = [selected]
+    else:
+        files = sorted(root.glob("*attribute*.json"))
+    if len(files) > 1:
+        raise ValueError("LVOS 속성 JSON이 여러 개입니다. settings.LVOS_ATTRIBUTE_FILE을 지정하세요.")
     if not files:
         return {}
     videos = json.loads(files[0].read_text(encoding="utf-8"))["videos"]

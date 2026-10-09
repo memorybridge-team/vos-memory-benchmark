@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ _translator = None
 
 def load() -> None:
     global _translator
+    _translator = None
     root = Path(settings.TRANSLATOR_DIR)
     weights = root / settings.TRANSLATOR_WEIGHTS
     digest = hashlib.sha256()
@@ -33,20 +35,36 @@ def load() -> None:
             digest.update(chunk)
     if digest.hexdigest() != settings.TRANSLATOR_SHA256:
         raise ValueError(f"전달받은 translator 가중치가 아닙니다 (SHA256 다름): {weights}")
-    sys.path.insert(0, str(root / settings.TRANSLATOR_SOURCE))
-    from vos_memory_inspector.transformer_translator import TransformerStateTranslator
+    source = (root / settings.TRANSLATOR_SOURCE).resolve()
+    # 프로젝트 모듈의 우선순위를 유지하며 전달본 패키지 경로만 import 때 사용한다.
+    original_path = sys.path[:]
+    try:
+        sys.path.append(str(source))
+        module = importlib.import_module("vos_memory_inspector.transformer_translator")
+    finally:
+        sys.path[:] = original_path
+    if not Path(module.__file__).resolve().is_relative_to(source):
+        raise ValueError(f"다른 translator 코드가 이미 import되어 있습니다: {module.__file__}")
     payload = torch.load(weights, map_location="cpu", weights_only=True)
-    _translator = TransformerStateTranslator.from_payload(payload).eval().to(settings.DEVICE)
+    _translator = module.TransformerStateTranslator.from_payload(payload).eval().to(settings.DEVICE)
 
 
 def translate(entries: dict) -> dict:
     """{프레임: 기억 칸} → 같은 모양, 칸마다 maskmem_features · obj_ptr 만 바뀐 것."""
     frames = sorted(entries)
+    if _translator is None or not frames:
+        raise ValueError("translator를 먼저 load하고 비어 있지 않은 기억을 전달하세요.")
     spatial = torch.stack([entries[f]["maskmem_features"][0] for f in frames])[None, None]   # [1, 1, 칸, 64, 64, 64]
     pointer = torch.stack([entries[f]["obj_ptr"][0] for f in frames])[None, None]            # [1, 1, 칸, 256]
+    spatial_dtype, pointer_dtype = spatial.dtype, pointer.dtype
+    spatial_shape, pointer_shape = spatial.shape, pointer.shape
     with torch.inference_mode(), torch.autocast(torch.device(settings.DEVICE).type, enabled=False):
         # translator.translate(CanonicalState) 안에서 하는 계산 그대로 (칸이 모두 유효할 때)
         spatial, pointer = _translator.translate_handoff_tensors(spatial, pointer)
+    if spatial.shape != spatial_shape or pointer.shape != pointer_shape:
+        raise ValueError("translator 출력의 기억 모양이 입력과 다릅니다.")
+    spatial = spatial.to(dtype=spatial_dtype)
+    pointer = pointer.to(dtype=pointer_dtype)
     return {f: {**entries[f], "maskmem_features": spatial[0, 0, k:k + 1], "obj_ptr": pointer[0, 0, k:k + 1]}
             for k, f in enumerate(frames)}
 
@@ -56,4 +74,4 @@ def prepare(session, pkg):
     return pkg.switch_frame + 1
 
 
-MODEL = Baseline("translator", "본 모델 (translator)", "model", prepare)
+MODEL = Baseline("translator", "본 모델 (translator)", "model", prepare, revision=2)

@@ -28,6 +28,17 @@ def test_metrics():
     assert jf.f_score(gt, gt) == 1.0
     assert jf.f_score(np.zeros_like(gt), gt) == 0.0
 
+    # 마스크 내부의 무시 영역이 새 경계나 새 F 대응점을 만들면 안 된다.
+    solid = np.zeros((40, 40), dtype=bool)
+    solid[5:35, 5:35] = True
+    void = np.zeros_like(solid)
+    void[15:25, 15:25] = True
+    assert np.array_equal(jf._boundary(solid & ~void, void), jf._boundary(solid))
+    shifted = np.roll(solid, 1, axis=1)
+    assert abs(jf.f_score(shifted, solid, void) - jf.f_score(shifted, solid)) < 1e-12
+    # 무시 영역 안에만 있는 예측은 유효한 경계를 갖지 않는다.
+    assert not jf._boundary(void, void).any()
+
     # 모든 테두리 점 쌍의 거리로 정답을 직접 계산한다.
     a, b = np.argwhere(jf._boundary(pred)), np.argwhere(jf._boundary(gt))
     distances = np.linalg.norm(a[:, None] - b[None, :], axis=-1)
@@ -57,8 +68,15 @@ def test_metrics():
     run.times = {9: 100.0}
     assert cost.cost_columns(run, 8)["switch_seconds"] == 2.0
 
-    assert settings.SWITCH_FRACTIONS == (0.5, 0.75)
+    assert settings.SWITCH_FRACTIONS == (0.25, 0.5, 0.75)
     assert switch_points(5, 29) == [{"name": "50", "frame": 17}, {"name": "75", "frame": 23}]
+    assert switch_points(0, 9) == []
+    assert switch_points(0, 11) == [{"name": "75", "frame": 8}]
+    assert switch_points(5, 15) == [{"name": "75", "frame": 13}]
+    assert switch_points(0, 12) == [{"name": "75", "frame": 9}]
+    assert switch_points(0, 32)[0] == {"name": "25", "frame": 8}
+    assert switch_points(0, 34)[0] == {"name": "25", "frame": 8}  # round(8.5)=8
+    assert switch_points(0, 38)[0] == {"name": "25", "frame": 10} # round(9.5)=10
     # 한 영상에 객체가 많아도 영상의 가중치는 동일하다. 가시성이 없는 시간점은 섞지 않는다.
     from evaluation.tables import temporal
     rows = [

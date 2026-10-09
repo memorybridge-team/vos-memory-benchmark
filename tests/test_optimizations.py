@@ -1,6 +1,7 @@
 """GPU 없이 복사 독립성, 측정 구간, shard 및 불필요한 모델 로딩을 검증한다."""
 
 import sys
+import threading
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ sys.path.insert(0, str(ROOT / 'tests'))
 
 import settings
 import translator
-from evaluation import cost, records, native
+from evaluation import cost, records, native, store
 from evaluation import data
 from evaluation.evaluate_video import evaluate_object
 from evaluation.methods import METHODS
@@ -49,6 +50,49 @@ def test_measurement_limit():
         assert [out.frame for out, _ in outputs] == list(range(10))
         assert [seconds for _, seconds in outputs] == [1.] * limit + [None] * (10 - limit)
         assert len(ticks) == 2 * limit
+
+
+def test_prefetch():
+    with tempfile.TemporaryDirectory(prefix='vos_prefetch_') as tmp:
+        setup(Path(tmp))
+        video = data.load_dataset('vost_val')[0]
+        reads = []
+        class ObservedFrames(sam2_runner.LazyFrames):
+            def _read(self, frame):
+                reads.append((frame, threading.current_thread().name))
+                return super()._read(frame)
+        sync = sam2_runner.LazyFrames(video.frame_paths, 16)
+        frames = ObservedFrames(video.frame_paths, 16)
+        try:
+            frames.configure_prefetch(8, 15)
+            for f in range(16):
+                assert torch.equal(frames[f], sync[f])
+                if f <= 8:
+                    assert frames._pending is None
+            assert frames._pending is None
+            workers = [(f, name) for f, name in reads if name.startswith('vos-frame')]
+            assert workers and all(8 < f <= 15 for f, _ in workers)
+            assert [f for f, _ in reads] == list(range(16))
+        finally:
+            frames.close()
+        assert frames._executor is frames._pending is None
+        # 옵션을 끄면 worker가 없고, 같은 CPU tensor를 동기 로드한다.
+        with patch.object(settings, 'PREFETCH_FRAMES', False):
+            frames.configure_prefetch(0, 15)
+            assert frames._executor is None
+            assert torch.equal(frames[3], sync[3])
+        # 미리 읽은 프레임의 파일 오류는 해당 프레임에서 전파하고 worker는 종료한다.
+        broken = ObservedFrames([video.frame_paths[0], Path(tmp) / 'missing.png'], 16)
+        try:
+            broken.configure_prefetch(-1, 1)
+            broken[0]
+            try:
+                broken[1]
+                raise AssertionError('프리페치 파일 오류를 무시함')
+            except FileNotFoundError:
+                pass
+        finally:
+            broken.close()
 
 
 def test_selection_and_idle():
@@ -89,14 +133,15 @@ def test_selection_and_idle():
             run_script('2_evaluate.py', '--dataset', 'vost_val', '--runs', '1', '--shard', '3/4')
 
         # Native 행만 누락된 경우 이미 저장된 기준을 사용한다. Small/Base+/translator를 안 켠다.
-        path = records.records_path('vost_val').with_name('vost_val.run1.shard0of2.jsonl')
-        original_rows = records.read_rows(path)
+        original_rows = [r for r in dataset_rows('vost_val') if r['run_id'] == 1 and r['video'] == '101_cut_carrot']
         missing = [r for r in original_rows if r['baseline'] == 'full_replay' and r['object'] == 1]
-        records.write_rows(path, [r for r in original_rows if r not in missing])
+        with store.connect() as conn:
+            conn.executemany('DELETE FROM results WHERE result_id=?', [(r['result_id'],) for r in missing])
         with patch.object(sam2_runner, 'load_runner', forbidden), patch.object(translator, 'load', forbidden):
             run_script('2_evaluate.py', '--dataset', 'vost_val', '--runs', '1', '--shard', '0/2')
-        restored = {records.row_key(r): r for r in records.read_rows(path)}
-        assert all(restored[records.row_key(r)] == r for r in missing)
+        restored = {records.row_key(r): r for r in dataset_rows('vost_val')}
+        assert all({k: v for k, v in restored[records.row_key(r)].items() if k != 'result_id'} ==
+                   {k: v for k, v in r.items() if k != 'result_id'} for r in missing)
         assert len(dataset_rows('vost_val')) == expected
 
         # 메모리를 전달하지 않는 방법은 Small 기억을 꺼내지 않는다.
@@ -116,6 +161,7 @@ def test_selection_and_idle():
                 got = evaluate_object(video, obj, fake_sam2.FakeRunner('small'),
                                       fake_sam2.FakeRunner('base_plus'), [method], native_reference=ref,
                                       pending_conditions={('75', sw['frame'], name)})
+            got = store.visible_rows(got)
             assert len(got) == 1
             expected_row = original_rows[records.row_key(got[0])]
             for field in ('frame_scores', 'pre_switch_frame_scores', 'restoration_frame_scores',
@@ -127,5 +173,6 @@ def test_selection_and_idle():
 if __name__ == '__main__':
     test_copy()
     test_measurement_limit()
+    test_prefetch()
     test_selection_and_idle()
     print('OK: 독립된 단일 tensor 복사, 전환 측정 범위, shard 누락/중복, 완료/Native 재사용 로딩 생략')

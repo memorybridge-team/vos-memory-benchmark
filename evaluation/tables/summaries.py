@@ -69,7 +69,7 @@ def format_stats(rows, metric, scale=1, digits=1):
 
 GROUP_FIELDS = ['dataset', 'switch_name', 'baseline']
 SUMMARY_FIELDS = GROUP_FIELDS + [f'{m}_{s}' for m in METRICS for s in ('mean', 'std', 'variance', 'run_count')] + ['video_count', 'object_count'] + [f'{m}_{count}' for m in SUPPORT_METRICS for count in ('video_count', 'object_count')]
-PER_RUN_FIELDS = GROUP_FIELDS + ['run_id'] + list(METRICS) + ['video_count', 'object_count']
+PER_RUN_FIELDS = GROUP_FIELDS + ['run_id'] + list(METRICS) + ['video_count', 'object_count'] + [f'{m}_{count}' for m in SUPPORT_METRICS for count in ('video_count', 'object_count')]
 PER_VIDEO_FIELDS = GROUP_FIELDS + ['run_id', 'video'] + list(METRICS) + ['object_count', 'n_frames', 'recovery_j_n_frames', 'recovery_jf_n_frames', 'zero_native_j_n_frames', 'zero_native_jf_n_frames', 'pending_native_n_frames'] + RECOVERY_COUNT_FIELDS + [f'{m}_object_count' for m in ('r2_maskmem_features', 'r2_obj_ptr')]
 
 
@@ -93,7 +93,9 @@ def build(rows):
         for run_id in sorted({r['run_id'] for r in chosen}):
             per_runs.append({**identity, 'run_id': run_id,
                              **{m: stats['per_run'][run_id] for m, stats in all_stats.items()},
-                             'video_count': summary['video_count'], 'object_count': summary['object_count']})
+                             'video_count': summary['video_count'], 'object_count': summary['object_count'],
+                             **{f'{m}_{count}': all_stats[m][count] for m in SUPPORT_METRICS
+                                for count in ('video_count', 'object_count')}})
         videos = defaultdict(list)
         for row in chosen:
             videos[(row['run_id'], row['video'])].append(row)

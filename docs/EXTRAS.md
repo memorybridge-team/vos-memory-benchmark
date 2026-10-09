@@ -14,7 +14,9 @@
 | PUMaVOS | 없음 | | |
 
 LVOS 속성 파일은 영상 zip에 없으므로 별도로 넣어야 한다. 없으면 LVOS 난이도 표는 라벨 없음으로 표시한다.
-`1_make_video_list.py`가 목록의 객체별 `extra_labels`에 라벨을 저장하고, 표 생성 시 읽는다.
+`1_make_video_list.py`가 목록의 객체별 `extra_labels`에 라벨을 저장한다.
+평가 시 이 라벨을 결과 JSONL에 고정하며 표는 결과의 라벨을 읽는다. 목록을 다시 만들어도 기존 결과의 라벨은 바뀌지 않는다.
+LVOS 속성 JSON이 여러 개면 `settings.LVOS_ATTRIBUTE_FILE`로 선택한다.
 이 필드 이름은 목록 메타데이터이며 별도의 평가 지표가 아니다.
 
 ## 공통 난이도 유형

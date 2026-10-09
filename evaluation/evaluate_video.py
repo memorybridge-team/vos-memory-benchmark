@@ -8,7 +8,7 @@
        ① Native는 회차별 저장된 기준이 있으면 재사용한다. Small은 필요한 객체마다 실행한다.
   ④ 전환 준비와 replay 구간만 시간·GPU 메모리 기록 (cost.py). Source-only 는 전환 없음.
   ⑤ 채점: J·J&F·실패 비율·프레임별 회복률과 전환 전후 곡선.
-  ⑥ 줄 목록을 돌려준다 (저장·이어하기는 records.py).
+  ⑥ 줄 목록을 돌려준다 (저장·이어하기는 store.py).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from evaluation import cost, native, repeats
 from baseline import no_handoff
 from baseline.handoff import HandoffPackage
 from evaluation.scoring import jf, main_metrics, recovery, restoration
+from evaluation.switches import eligible_objects
 
 
 @dataclass
@@ -79,8 +80,14 @@ def _run_small(small, video, obj, prompt, keeper, *,
     session = small.start(video)
     try:
         session.add_prompt(start, prompt)
+        if hasattr(session, 'configure_prefetch'):
+            session.configure_prefetch(start - 1, end)
+        expected_frame = start
         for out in session.track(start, end):
             f = out.frame
+            if f != expected_frame:
+                raise ValueError(f'Small 추적 프레임 누락/순서 오류: 기대 {expected_frame}, 실제 {f}')
+            expected_frame += 1
             keeper.keep(run, f, out.mask)
             if out.mask.any():
                 last_visible = (f, out.mask)
@@ -89,6 +96,8 @@ def _run_small(small, video, obj, prompt, keeper, *,
                     switch_frame=f, prompt_frame=start, prompt_mask=prompt,
                     small_memory=session.export_memory() if f in memory_frames else {},
                     last_visible=last_visible)
+        if expected_frame != end + 1:
+            raise ValueError(f'Small 추적이 마지막 프레임 전에 끝났습니다: {expected_frame}~{end}')
     finally:
         session.close()
     return run, packages
@@ -125,7 +134,13 @@ def _run_base(base, video, obj, prepare, keep_after, keeper,
             # s+1 이후 추론/채점은 진행하되 전환 비용용 동기화와 통계는 만들지 않는다.
             measure_through = max(snapshot_frames, default=keep_after)
             measure_frames = max(0, measure_through - track_from + 1)
+            if hasattr(session, 'configure_prefetch'):
+                session.configure_prefetch(measure_through, end)
+            expected_frame = track_from
             for out, seconds in cost.timed(session.track(track_from, end), measure_frames):
+                if out.frame != expected_frame:
+                    raise ValueError(f'Base+ 추적 프레임 누락/순서 오류: 기대 {expected_frame}, 실제 {out.frame}')
+                expected_frame += 1
                 if seconds is not None:
                     run.times[out.frame] = seconds
                     run.gpu_peaks[out.frame] = cost.gpu_peak_mb()
@@ -136,6 +151,8 @@ def _run_base(base, video, obj, prepare, keep_after, keeper,
                     run.restoration = restoration.result(session.export_features(), restoration_reference, keep_after)
                 if out.frame > keep_after:
                     keeper.keep(run, out.frame, out.mask)
+            if expected_frame != end + 1:
+                raise ValueError(f'Base+ 추적이 마지막 프레임 전에 끝났습니다: {expected_frame}~{end}')
     finally:
         session.close()
     return run
@@ -147,6 +164,7 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
     row = {"dataset": video.dataset, "video": video.name, "object": obj["object"],
            "switch_name": sw["name"], "switch_frame": s,
            "start": obj["start"], "end": obj["end"], "baseline": baseline.name, "role": baseline.role,
+           "extra_labels": list(obj.get("extra_labels", [])),
            "baseline_revision": baseline.revision,
            "evaluation_revision": settings.EVALUATION_REVISION,
            "runtime_revision": settings.EVALUATION_RUNTIME_REVISION,
@@ -162,11 +180,23 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
     row["failure_rate"] = main_metrics.failure_rate(visible)
     if reference_scores is None:
         reference_scores = native.scores(reference)
-    row["frame_scores"] = [recovery.raw_point(f, sc, reference_scores.get(f), s) for f, sc in scored]
+    def point(f, sc):
+        value = native.score_point(f, sc)
+        ref = reference_scores.get(f)
+        value.update(frames_after_switch=f - s,
+                     native_run_j=ref.j if ref is not None else None,
+                     native_run_f=ref.f if ref is not None else None,
+                     native_run_jf=ref.jf if ref is not None else None,
+                     native_j=None, native_jf=None, recovery_j=None, recovery_jf=None,
+                     native_reference_count=0, native_reference_ready=False)
+        return value
+    row["frame_scores"] = [point(f, run.scores.get(f)) for f in range(s + 1, obj['end'] + 1)]
     row.update(recovery.columns(row["frame_scores"]))
     row["pre_switch_frame_scores"] = [
-        recovery.raw_point(f, sc, reference_scores.get(f), s)
-        for f, sc in sorted(pre_run.scores.items()) if f <= s and sc.gt_visible]
+        point(f, pre_run.scores.get(f)) for f in range(obj['start'], s + 1)]
+    row['frame_times'] = [
+        {'frame': f, 'seconds': run.times.get(f), 'gpu_peak_mb': run.gpu_peaks.get(f)}
+        for f in range(obj['start'], obj['end'] + 1)]
     row.update(recovery.phase_columns(row['pre_switch_frame_scores'], 'pre'))
     row.update(recovery.phase_columns(row['frame_scores'], 'post'))
     row['recovery_statistic'] = 'ratio_of_means'
@@ -177,9 +207,14 @@ def _row(video, obj, sw, baseline, run, cost_info, reference, pre_run, run_id, s
 
 
 def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
-                    native_reference=None, save_native=None, pending_conditions=None) -> list[dict]:
-    """각 회차 Native를 한 번만 실행/저장하고 모든 방법·50/75%에 공유한다."""
+                    native_reference=None, save_native=None, pending_conditions=None,
+                    save_result=None) -> list[dict]:
+    """각 회차 Native를 한 번만 실행/저장하고 모든 방법·25/50/75%에 공유한다."""
     seed = settings.EVALUATION_SEED if seed is None else seed
+    entries = eligible_objects([{'video': video.name, 'objects': [obj]}])
+    if not entries:
+        return []
+    obj = entries[0]['objects'][0]
     conditions = {(sw['name'], sw['frame'], m.name) for sw in obj['switches'] for m in methods}
     if pending_conditions is not None:
         conditions &= set(pending_conditions)
@@ -207,7 +242,11 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
         native_memories = (native.load_memories(reference)
                            if any(name != 'source_only' for _, _, name in conditions) else {})
     reference_scores = native.scores(reference)
-    replay_run = Run(scores=reference_scores)
+    replay_run = Run(scores=reference_scores,
+                     times={p['frame']: p['seconds'] for p in reference.get('frame_times', [])
+                            if p['seconds'] is not None},
+                     gpu_peaks={p['frame']: p['gpu_peak_mb'] for p in reference.get('frame_times', [])
+                                if p['seconds'] is not None})
 
     # 완료한 전환을 재실행하지 않는다. Source-only가 필요할 때만 Small을 끝까지 돌린다.
     small_conditions = {(name, f, method) for name, f, method in conditions if method != 'full_replay'}
@@ -254,5 +293,7 @@ def evaluate_object(video, obj, small, base, methods, run_id=1, seed=None,
                 raise ValueError(f'전환 시점의 복원율 측정이 누락되었습니다: {baseline.name}, {s}')
             # 원본에는 칸별 R²/SSE/SST만 저장한다.
             # 전체 기억 R²과 객체/영상/회차 요약은 3_make_tables.py에서 재계산한다.
+            if save_result is not None:
+                save_result(row)
             rows.append(row)
     return rows

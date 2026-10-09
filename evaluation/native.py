@@ -1,4 +1,4 @@
-"""회차별 Native 원점수·비용은 JSONL, 전환 시점 기억 기준은 CPU tensor 파일에 보존한다."""
+"""회차별 Native 원점수·비용은 SQLite, 전환 시점 기억 기준은 CPU tensor 파일에 보존한다."""
 
 import os
 import re
@@ -8,14 +8,9 @@ from uuid import uuid4
 import torch
 
 import settings
-from evaluation import cost, records
+from evaluation import cost
 from evaluation.scoring.jf import FrameScore
 from evaluation.scoring import restoration
-
-
-def reference_path(dataset, run_id, shard=None):
-    suffix = f'.shard{shard.replace("/", "of")}' if shard else ''
-    return Path(settings.OUTPUT_ROOT) / 'native' / f'{dataset}.run{run_id}{suffix}.jsonl'
 
 
 def case_key(video, obj, run_id, seed):
@@ -32,18 +27,12 @@ def load_references(dataset, *, videos=None, run_ids=None, seed=None):
     refs = {}
     selected = None if videos is None else set(videos)
     runs = None if run_ids is None else set(run_ids)
-    for path in sorted((Path(settings.OUTPUT_ROOT) / 'native').glob(f'{dataset}.run*.jsonl')):
-        for ref in records.iter_rows(path):
-            if ref.get('evaluation_revision') != settings.EVALUATION_REVISION or ref.get('dataset') != dataset:
-                continue
-            if (selected is not None and ref['video'] not in selected
-                    or runs is not None and ref['run_id'] not in runs
-                    or seed is not None and ref['seed'] != seed):
-                continue
-            key = reference_key(ref)
-            if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
-                raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
-            refs[key] = ref
+    from evaluation.store import load_native
+    for ref in load_native(dataset, videos=selected, run_ids=runs, seed=seed):
+        key = reference_key(ref)
+        if key in refs and refs[key]['native_reference_id'] != ref['native_reference_id']:
+            raise ValueError(f'동일 조건의 Native 기준이 둘 이상입니다: {key}')
+        refs[key] = ref
     return refs
 
 
@@ -56,14 +45,23 @@ def pack(video, obj, run, run_id, seed):
         'dataset': video.dataset, 'video': video.name, 'object': obj['object'],
         'start': obj['start'], 'end': obj['end'], 'switches': obj['switches'],
         'run_id': run_id, 'seed': seed,
-        'scores': [{'frame': f, 'j': s.j, 'f': s.f, 'gt_visible': s.gt_visible}
-                   for f, s in sorted(run.scores.items())],
+        'scores': [score_point(f, run.scores.get(f)) for f in range(obj['start'], obj['end'] + 1)],
+        'frame_times': [{'frame': f, 'seconds': run.times.get(f), 'gpu_peak_mb': run.gpu_peaks.get(f)}
+                        for f in range(obj['start'], obj['end'] + 1)],
         'costs': {str(sw['frame']): cost.cost_columns(run, sw['frame']) for sw in obj['switches']},
     }
 
 
+def score_point(frame, score):
+    return {'frame': frame, 'has_gt': score is not None,
+            'gt_visible': score.gt_visible if score is not None else None,
+            'j': score.j if score is not None else None,
+            'f': score.f if score is not None else None,
+            'jf': score.jf if score is not None else None}
+
+
 def scores(ref):
-    return {p['frame']: FrameScore(p['j'], p['f'], p['gt_visible']) for p in ref['scores']}
+    return {p['frame']: FrameScore(p['j'], p['f'], p['gt_visible']) for p in ref['scores'] if p['j'] is not None}
 
 
 def memory_path(ref):
@@ -74,7 +72,7 @@ def memory_path(ref):
 
 
 def save_memories(ref, snapshots):
-    """전환 시점 CPU 기억 snapshot을 원자적으로 저장한 뒤 Native JSONL을 쓰게 한다."""
+    """전환 시점 CPU 기억 snapshot을 원자적으로 저장한 뒤 Native DB 기록을 커밋하게 한다."""
     path = memory_path(ref)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.pt.tmp')
