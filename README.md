@@ -133,7 +133,7 @@ DB와 native_memory 폴더를 함께 보존한다. CPU RAM과 디스크 사용�
 기존 표에 spatial/pointer 두 R² 열을 평균 ± 반복 표준편차로 보고한다. 칸별 R²의 단순 평균은 아니다.
 프레임별 충분통계량은 그대로 보존하므로 재추론 없이 집계하며, 복원율은 원래 R² 척도로 표시한다. 자세한 정의는 docs/PROTOCOL.md를 참고한다.
 
-현재 결과 버전은 6, 영상 목록 버전은 3, 실행 시간 버전은 3이다. 25% 전환·전환별 사전 제외·SQLite 전체 프레임 저장을 적용한다. 버전 5 이하 JSONL은 보존하지만 새 평가·집계·재개에서는 읽지 않는다. 새 정의의 결과는 다시 추론한다.
+현재 결과 버전은 6, 영상 목록 버전은 3, 실행 시간 버전은 5이다. 25% 전환·전환별 사전 제외·SQLite 전체 프레임 저장을 적용한다. 결과 버전 5 이하 JSONL은 보존하지만 새 평가·집계·재개에서는 읽지 않는다. 새 정의의 결과는 다시 추론한다.
 translator의 방법 revision은 2이며, 출력 dtype을 원래 spatial/pointer dtype으로 되돌린다.
 기존 영상 목록은 `1_make_video_list.py`로 다시 만든다. `s-start < 8`인 전환만 제외하고, 유효 전환이 없는 객체와 영상은 목록에 넣지 않는다. 정확히 8이면 포함한다. 등장 0·끝 12이면 25%=3과 50%=6은 제외하고 75%=9만 평가한다.
 조건별 seed는 반복 번호와 영상·객체·방법으로 결정되어 분할/이어하기 순서에 영향을 받지 않는다.
@@ -148,6 +148,20 @@ SQLite 스키마는 `evaluation/schema.sql`이다. `native_frame_scores`·`frame
 원점수는 실행 조건별 트랜잭션으로 저장하고, 중단하면 완료된 조건만 재개에서 건너뛴다. 체크포인트 해시·설정으로 `experiment_id`를 구분하며 방법 revision도 고유 키에 포함한다. 예측 마스크와 방법별 기억 tensor는 저장하지 않는다. 복원율은 저장한 충분통계량으로 재계산할 수 있는 범위만 지원한다.
 
 `PREFETCH_FRAMES=True`이면 Small 및 Base+의 측정하지 않는 미래 구간에서만 CPU worker가 다음 한 장을 준비한다. 측정할 준비/replay 프레임은 동기 로드하며 GPU 추론은 순차 실행한다. 실제 GPU 활용률과 전체 시간 개선은 서버에서 측정해야 한다.
+
+`SCORING_WORKERS=1`이면 CPU 채점과 다음 GPU 프레임 추론을 겹친다. `SCORING_QUEUE_FRAMES=4`로 실행/대기 중인 마스크 수를 제한한다. 전환 준비 및 측정할 replay 구간에는 채점 worker를 만들지 않으며, Native의 측정 구간은 동기 채점한다. 각 추적이 끝나면 worker와 이미지 프리페치를 종료한 뒤 다음 측정을 시작한다. 저장 전에 모든 채점 완료를 확인하고 오류는 전파한다.
+
+`GT_CACHE_MB=128`은 객체별 정답 마스크·경계·거리 변환 LRU의 보관 용량(MiB)이다. 객체의 여러 방법/전환이 같은 정답을 재사용한다. 긴 영상에서 캐시가 부족하면 재계산하며, 실제 RAM에는 대기 마스크와 worker 임시 배열도 추가된다. `SCORING_WORKERS=0`으로 동기 채점, `GT_CACHE_MB=0`으로 캐시를 끌 수 있다. OpenCV 내부 병렬화와 중복되지 않도록 worker는 기본 1개다.
+
+DB 원점수 메타데이터의 `cpu_profile`·`pre_cpu_profile`에 추적 전체 시간, RGB 읽기/준비 시간, GT 읽기/준비·J/F 채점 시간, 큐 대기시간·캐시 적중 수를 남긴다. 프로파일은 구간별 비용이 아니라 추적 한 번의 기록이며, 여러 전환에서 공유한 기록은 `tracking_id`로 중복을 제거한다. worker 시간은 겹칠 수 있으므로 전체 시간처럼 합산하지 않는다. GPU 순수 실행시간은 새로 측정하지 않으며 기존 전환 비용 측정 범위를 유지한다.
+
+`RGB_CACHE_MB=256`은 객체 실행 안에서 Small/Base+가 공유하는 정규화된 CPU 입력 LRU다. 세션 생성·프롬프트 준비·측정 replay에서는 읽기와 저장 모두 우회하며, 측정 없는 프레임에서만 사용한다. 캐시 키에는 파일 경로·크기·수정 시각·전처리 설정을 넣고 반환 tensor는 독립 복사한다. 실제 적중 수는 `cpu_profile.image_preparation.cache_hits`로 확인한다.
+
+`RESTORATION_CACHE_MB=128`은 같은 객체/회차의 변경하지 않는 Native snapshot에 대한 float64 입력·평균·SST 캐시다. 기존 중심화된 SST, SSE, R² 공식과 N/A 사유를 유지한다. `restoration_cache_profile`에 결과별 적중·누락 수를 남긴다. 두 캐시는 각각 0으로 끌 수 있고, 작업 중 임시 배열은 보관 상한 외 RAM을 사용한다.
+
+`BENCHMARK_SKIP_VISIBLE=True`는 benchmark가 사용하지 않는 presence scalar 조회를 생략한다. benchmark 출력의 `visible`은 None이며, 일반 Session은 기존 bool 값을 반환한다. SAM2 내부 presence logits와 last-visible 마스크 선택은 유지한다. SQLite는 평가 루프 동안 연결만 재사용하고 각 결과의 트랜잭션은 별도로 커밋한다. GPU 추론 중에는 DB 트랜잭션을 열어 두지 않는다.
+
+추가 최적화는 실행 버전 5로 구분한다. 이전 실험과 재개 ID가 달라지며 `0_check_sam2.py`도 다시 실행해야 한다. 기존 실험은 저장된 ID를 선택해 계속 집계할 수 있다. 구현과 검증 범위는 [EXTRA_OPTIMIZATION.md](docs/EXTRA_OPTIMIZATION.md)에 있다.
 
 SQLite journal은 기본 DELETE다. WAL은 로컬 디스크에서만 명시적으로 설정한다. 공유 볼륨의 파일 잠금 지원을 확인하고, 같은 조건을 두 프로세스에 배정하지 않는다. WAL 사용 시 실행 중 `.sqlite`만 복사하지 말고 SQLite backup API로 백업한다.
 
@@ -183,6 +197,7 @@ python tests/test_end_to_end.py
 python tests/test_validation.py
 python tests/test_sqlite_store.py
 python tests/test_experiment_selection.py
+python tests/test_cpu_scoring.py
 ```
 
 전환 시점의 `round`는 Python의 ties-to-even 규칙이다. 예를 들어 구간 차이가 9이면 50%는 `round(4.5)=4`다.

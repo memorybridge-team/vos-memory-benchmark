@@ -192,7 +192,7 @@ Native는 25/50/75%에서 두 필드의 CPU 기억을 snapshot으로 꺼내 `out
 Native tensor snapshot 때문에 CPU RAM과 디스크 사용량이 늘어난다. tensor dtype/기억 칸 수에 따라 달라지며,
 (1,64,64,64) BF16 feature 하나는 약 0.5 MiB이다. 같은 회차에 유효한 전환마다 snapshot을 저장한다.
 준비된 Target의 전체 tensor는 별도 파일로 저장하지 않고 프레임별 R² 및 충분통계량만 기록한다.
-버전 3 원점수에는 기억 snapshot이 없으므로 R²을 소급 계산할 수 없다. 기존 파일은 보존하며 현재 버전 5 결과와 섞지 않는다.
+버전 3 원점수에는 기억 snapshot이 없으므로 R²을 소급 계산할 수 없다. 기존 파일은 보존하며 현재 평가 버전 6 결과와 섞지 않는다.
 
 ### 전환시간(초)
 
@@ -236,7 +236,7 @@ J_Recall = (J > 50인 대상 프레임 수) ÷ (대상 프레임 수).
 
 ## 결과 저장과 이어하기
 
-결과 버전은 `evaluation_revision = 6`, 목록 버전은 3, 실행 시간 버전은 3이다.
+결과 버전은 `evaluation_revision = 6`, 목록 버전은 3, 실행 시간 버전은 5이다.
 25% 전환·전환별 8프레임 자격·전체 프레임 SQLite 저장을 적용한다. 버전 5 이하 JSONL은 보존하지만 새 평가·집계·재개에서는 읽지 않는다. 기존 목록은 다시 생성한다.
 Original + Last-Visible과 translator의 방법 버전은 2, 나머지는 1이다.
 
@@ -262,6 +262,13 @@ LVOS val/valid 또는 속성 JSON이 여러 개면 설정에서 사용할 후보
 - 기본 journal은 DELETE다. WAL은 네트워크 파일시스템에서 사용하지 않는다. 공유 볼륨은 파일 잠금 지원을 확인한다. 실행 중 DB 백업은 SQLite backup API를 사용한다.
 - native_frame_times·result_frame_times에는 실제 측정한 Base+ replay 시간과 준비 이후 누적 GPU peak를 기록한다. Small 및 측정하지 않은 프레임은 NULL이며 프롬프트 준비 시간은 switch_seconds에 포함한다.
 - PREFETCH_FRAMES는 측정 없는 추적 구간에서만 CPU 이미지 읽기/전처리 한 장을 겹친다. 측정할 준비/replay 프레임은 동기 로드하고 GPU 추론은 순차 실행한다. worker는 세션 종료/오류 때 정리한다.
+- SCORING_WORKERS=1, SCORING_QUEUE_FRAMES=4로 CPU 채점 큐를 제한한다. 예측 마스크는 큐에 복사하며, 결과 수집/DB 쓰기는 주 스레드에서 한다. 전환 준비 및 replay 측정 중에는 worker를 만들지 않는다. Native는 마지막 측정 전환까지 동기 채점하고 그 이후에만 병렬 채점한다. 각 추적 종료 때 대기 작업을 모두 수집하고 worker를 종료한다. 오류는 저장 전에 전파한다.
+- GT_CACHE_MB=128은 객체별 읽기 전용 정답 마스크·경계·거리 변환 LRU의 보관 상한(MiB)이다. 초과/축출된 프레임은 재계산한다. 프레임 큐·작업 중 임시 배열은 캐시 외 RAM을 사용한다. SCORING_WORKERS=0 또는 GT_CACHE_MB=0으로 해당 기능을 끌 수 있다. J/F와 GT 가시성 정의는 바꾸지 않는다.
+- 실행 버전 5의 RGB_CACHE_MB=256은 같은 객체 실행의 정규화된 CPU 입력 LRU다. 파일 경로·크기·수정 시각 및 전처리 설정을 구분하고, 반환 입력은 독립 복사한다. 세션 초기화·프롬프트 준비·측정할 replay에서는 캐시를 읽거나 채우지 않는다.
+- RESTORATION_CACHE_MB=128은 같은 회차의 변경하지 않는 Native snapshot만 대상으로 CPU float64 입력·평균·중심화된 SST를 재사용한다. SSE/R²와 결측 사유는 유지한다. 두 캐시는 0으로 끌 수 있다. 입력 파일·평가 설정·Native snapshot은 실행 도중 변경하지 않는다.
+- BENCHMARK_SKIP_VISIBLE=True이면 미사용 presence scalar 조회를 생략하고 FrameOut.visible은 None이다. 일반 Session의 기본 bool 의미와 SAM2 내부 presence logits는 유지한다. benchmark의 last-visible은 기존처럼 예측 마스크가 비어 있지 않은 마지막 프레임이다.
+- 평가 루프는 SQLite 연결만 재사용한다. 각 결과의 저장은 별도 SAVEPOINT로 원자적으로 커밋하며 중첩 호출도 외부 트랜잭션을 조기 커밋하지 않는다. 추론 동안 연결에 활성 트랜잭션은 없다.
+- cpu_profile/pre_cpu_profile은 추적 전체 프로파일이다. tracking_id로 중복을 제거하고 RGB 읽기/준비, GT 읽기/준비, J/F 및 큐 대기시간을 확인한다. 병렬 worker 시간을 합산하여 전체 실행시간으로 읽지 않는다. 기존 전환 비용 및 프레임 시간의 측정 범위는 그대로다.
 
 이어하기 키는 반복 번호·seed·영상·객체·전환 이름·실제 전환 프레임·방법이다.
 각 회차는 다른 회차의 완료 기록에 의해 건너뛰지 않는다. 일부 전환만 빠진 경우 누락된 줄만 추가한다.
